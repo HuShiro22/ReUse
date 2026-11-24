@@ -26,7 +26,7 @@ function renderHeader() {
     `<a class="${active('/explore')}" href="#/explore">Explore</a>`,
     `<a href="#/" onclick="goHomeSection('about')">Tentang Kami</a>`
   ];
-  if (user && user.role === 'seller') items.push(`<a class="${active('/seller')}" href="#/seller">Seller Dashboard</a>`);
+  if (user && user.role !== 'admin') items.push(`<a class="${active('/seller')}" href="#/seller">Seller Dashboard</a>`);
   if (user && user.role === 'admin') items.push(`<a href="#/admin">Admin Dashboard</a>`);
 
   el.innerHTML = `<header class="site"><div class="container nav">
@@ -43,11 +43,11 @@ function renderHeader() {
             ${avatarHtml(user)}<span class="profile-name">${safe(user.name.split(' ')[0])}</span><span class="caret" style="font-size:10px;color:var(--muted)">▾</span>
           </button>
           <div class="profile-dropdown" id="profileDropdown">
-            <div class="who"><strong>${safe(user.name)}</strong><small>@${safe(user.username)} · ${user.role === 'admin' ? 'Administrator' : user.role === 'seller' ? 'Seller' : 'Customer'}</small></div>
+            <div class="who"><strong>${safe(user.name)}</strong><small>@${safe(user.username)} · ${user.role === 'admin' ? 'Administrator' : 'Member'}</small></div>
             <a href="#/profile" onclick="closeProfileMenu()">👤 Profil Saya</a>
             ${user.role !== 'admin' ? `<button onclick="closeProfileMenu();openWishlist()">♡ Wishlist</button>
             <button onclick="closeProfileMenu();openCart()">🛒 Keranjang</button>` : ''}
-            ${user.role === 'seller' ? `<a href="#/seller" onclick="closeProfileMenu()">▦ Seller Dashboard</a>` : ''}
+            ${user.role !== 'admin' ? `<a href="#/seller" onclick="closeProfileMenu()">▦ Seller Dashboard</a>` : ''}
             ${user.role === 'admin' ? `<a href="#/admin" onclick="closeProfileMenu()">▤ Admin Dashboard</a>` : ''}
             <button class="danger" onclick="requestLogout()">↩ Logout</button>
           </div>
@@ -299,10 +299,10 @@ function router() {
     return;
   }
   if (path === '/seller') {
-    if (!user) { toast('Silakan login sebagai seller.', 'info'); navigate('/login'); return; }
-    if (user.role !== 'seller') {
-      toast('Seller Dashboard hanya dapat diakses akun seller.', 'error');
-      navigate(user.role === 'admin' ? '/admin' : '/');
+    if (!user) { toast('Silakan login untuk membuka Seller Dashboard.', 'info'); navigate('/login'); return; }
+    if (user.role === 'admin') {
+      toast('Akun administrator tidak menggunakan Seller Dashboard.', 'info');
+      navigate('/admin');
       return;
     }
     setChrome(true);

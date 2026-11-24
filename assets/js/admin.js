@@ -89,8 +89,8 @@ function adminOverviewHtml() {
   const users = DB.users();
   const products = DB.products();
   const reports = DB.reports();
-  const customers = users.filter(u => u.role === 'customer');
-  const sellers = users.filter(u => u.role === 'seller');
+  const members = users.filter(u => u.role !== 'admin');
+  const withProducts = members.filter(u => products.some(p => p.sellerId === u.id));
   const active = products.filter(p => p.status === 'approved');
   const pending = products.filter(p => p.status === 'pending');
   const rejected = products.filter(p => p.status === 'rejected');
@@ -102,8 +102,8 @@ function adminOverviewHtml() {
       <span class="small">${new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span></div>
     <div class="stat-grid stats-4">
       ${stat('♙', 'Total Users', users.length)}
-      ${stat('☺', 'Total Customers', customers.length)}
-      ${stat('↗', 'Total Sellers', sellers.length)}
+      ${stat('☺', 'Total Members', members.length)}
+      ${stat('↗', 'Penjual Aktif', withProducts.length)}
       ${stat('▦', 'Total Products', products.length)}
       ${stat('✓', 'Active Products', active.length, 'ok')}
       ${stat('◷', 'Pending Products', pending.length, 'warn')}
@@ -118,9 +118,9 @@ function adminOverviewHtml() {
         ${userGrowthChart()}
       </div>
       <div class="chart-card">
-        <h3>Perbandingan Seller &amp; Customer</h3>
-        <p class="chart-sub">Komposisi akun terdaftar saat ini</p>
-        ${donutChart(sellers.length, customers.length)}
+        <h3>Partisipasi Menjual</h3>
+        <p class="chart-sub">Member yang sudah memasang produk vs belum</p>
+        ${donutChart(withProducts.length, members.length - withProducts.length)}
       </div>
       <div class="chart-card">
         <h3>Produk per Kategori</h3>
@@ -214,21 +214,21 @@ function userGrowthChart() {
 }
 function escapeSvg(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-function donutChart(sellers, customers) {
-  const total = sellers + customers || 1;
+function donutChart(withProducts, withoutProducts) {
+  const total = withProducts + withoutProducts || 1;
   const r = 54, c = 2 * Math.PI * r;
-  const a = (sellers / total) * c;
+  const a = (withProducts / total) * c;
   return `<div class="donut-wrap">
-    <svg width="144" height="144" viewBox="0 0 144 144" role="img" aria-label="Perbandingan seller dan customer">
+    <svg width="144" height="144" viewBox="0 0 144 144" role="img" aria-label="Perbandingan member yang punya produk dan belum">
       <circle cx="72" cy="72" r="${r}" fill="none" stroke="#e9efe8" stroke-width="18"/>
-      ${sellers ? `<circle cx="72" cy="72" r="${r}" fill="none" stroke="#244c3a" stroke-width="18" stroke-dasharray="${a.toFixed(2)} ${(c - a).toFixed(2)}" stroke-dashoffset="0" transform="rotate(-90 72 72)"/>` : ''}
-      ${customers ? `<circle cx="72" cy="72" r="${r}" fill="none" stroke="#6d9b78" stroke-width="18" stroke-dasharray="${(c - a).toFixed(2)} ${a.toFixed(2)}" stroke-dashoffset="${(-a).toFixed(2)}" transform="rotate(-90 72 72)"/>` : ''}
-      <text x="72" y="69" text-anchor="middle" font-size="22" font-weight="800" fill="#244c3a">${sellers + customers}</text>
-      <text x="72" y="86" text-anchor="middle" font-size="10" fill="#73786f">akun</text>
+      ${withProducts ? `<circle cx="72" cy="72" r="${r}" fill="none" stroke="#244c3a" stroke-width="18" stroke-dasharray="${a.toFixed(2)} ${(c - a).toFixed(2)}" stroke-dashoffset="0" transform="rotate(-90 72 72)"/>` : ''}
+      ${withoutProducts ? `<circle cx="72" cy="72" r="${r}" fill="none" stroke="#6d9b78" stroke-width="18" stroke-dasharray="${(c - a).toFixed(2)} ${a.toFixed(2)}" stroke-dashoffset="${(-a).toFixed(2)}" transform="rotate(-90 72 72)"/>` : ''}
+      <text x="72" y="69" text-anchor="middle" font-size="22" font-weight="800" fill="#244c3a">${withProducts + withoutProducts}</text>
+      <text x="72" y="86" text-anchor="middle" font-size="10" fill="#73786f">member</text>
     </svg>
     <div class="legend">
-      <div><span style="background:#244c3a"></span>Seller <b>${sellers}</b> (${Math.round(sellers / total * 100)}%)</div>
-      <div><span style="background:#6d9b78"></span>Customer <b>${customers}</b> (${Math.round(customers / total * 100)}%)</div>
+      <div><span style="background:#244c3a"></span>Punya produk <b>${withProducts}</b> (${Math.round(withProducts / total * 100)}%)</div>
+      <div><span style="background:#6d9b78"></span>Belum punya produk <b>${withoutProducts}</b> (${Math.round(withoutProducts / total * 100)}%)</div>
       <div><span style="background:#e9efe8"></span>Administrator <b>${DB.users().filter(u => u.role === 'admin').length}</b></div>
     </div>
   </div>`;
@@ -444,8 +444,7 @@ function adminUsersHtml() {
       <div class="search"><span>⌕</span><input id="adminUserSearch" type="search" value="${safe(adminUserFilters.q)}" placeholder="Cari nama, username, atau email..." oninput="adminUserFilters.q=this.value;renderAdminUserTable()"></div>
       <select onchange="adminUserFilters.role=this.value;renderAdminUserTable()">
         <option value="">Semua role</option>
-        <option value="customer" ${adminUserFilters.role === 'customer' ? 'selected' : ''}>Customer</option>
-        <option value="seller" ${adminUserFilters.role === 'seller' ? 'selected' : ''}>Seller</option>
+        <option value="member" ${adminUserFilters.role === 'member' ? 'selected' : ''}>Member</option>
         <option value="admin" ${adminUserFilters.role === 'admin' ? 'selected' : ''}>Administrator</option>
       </select>
     </div>
@@ -476,7 +475,7 @@ function adminUserTableHtml() {
         <td><div class="cell-product">${avatarHtml(u)}<div><strong>${safe(u.name)}</strong><small>@${safe(u.username)} · ${safe(u.location)}</small></div></div></td>
         <td>${safe(u.email)}</td>
         <td style="white-space:nowrap">${safe(u.phone)}</td>
-        <td><span class="badge ${u.role === 'seller' ? 'badge-approved' : u.role === 'admin' ? 'badge-sold' : 'badge-pending'}">${u.role}</span></td>
+        <td><span class="badge ${u.role === 'admin' ? 'badge-sold' : 'badge-approved'}">${u.role === 'admin' ? 'Administrator' : 'Member'}</span></td>
         <td style="white-space:nowrap">${fmtDate(u.createdAt)}</td>
         <td><span class="badge ${u.status === 'active' ? 'badge-approved' : 'badge-rejected'}">${u.status === 'active' ? 'Aktif' : 'Nonaktif'}</span></td>
         <td><div class="row-actions">
@@ -498,7 +497,7 @@ function openAdminUser(id) {
   openModal(`
     <div style="display:flex;gap:14px;align-items:center">${avatarHtml(u, 'lg')}
       <div><h2 style="margin:0">${safe(u.name)}</h2><div class="small">@${safe(u.username)}</div>
-        <span class="badge ${u.role === 'seller' ? 'badge-approved' : u.role === 'admin' ? 'badge-sold' : 'badge-pending'}">${u.role}</span></div>
+        <span class="badge ${u.role === 'admin' ? 'badge-sold' : 'badge-approved'}">${u.role === 'admin' ? 'Administrator' : 'Member'}</span></div>
     </div>
     <div class="meta-list">
       <div><b>Email:</b> ${safe(u.email)}</div>

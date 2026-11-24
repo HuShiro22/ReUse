@@ -178,7 +178,7 @@ function sellerTableHtml(list) {
 /* ---------------- Add / edit product ---------------- */
 function openProductForm(id) {
   const user = Auth.currentUser();
-  if (!user || user.role !== 'seller') { toast('Hanya akun seller yang dapat menambahkan produk.', 'error'); return; }
+  if (!user || user.role === 'admin') { toast('Login sebagai member untuk menambahkan produk.', 'error'); return; }
   const existing = id ? DB.productById(id) : null;
   if (existing && existing.sellerId !== user.id) {
     toast('Kamu hanya dapat mengedit produk milik sendiri.', 'error');
@@ -238,7 +238,7 @@ function onProductImage(e) {
 function saveProduct(e, id) {
   e.preventDefault();
   const user = Auth.currentUser();
-  if (!user || user.role !== 'seller') return;
+  if (!user || user.role === 'admin') return;
   const f = e.target;
   clearAlert('productAlert');
   const name = SEC.cleanText(f.name.value, 80);
@@ -297,7 +297,7 @@ function saveProduct(e, id) {
 /* ---------------- Delete / sold ---------------- */
 function deleteProduct(id) {
   const user = Auth.currentUser();
-  if (!user || user.role !== 'seller') return;
+  if (!user || user.role === 'admin') return;
   const p = DB.productById(id);
   if (!p) { toast('Produk tidak ditemukan.', 'error'); return; }
   if (p.sellerId !== user.id) {

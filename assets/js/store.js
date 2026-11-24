@@ -37,12 +37,12 @@ function hashPassword(pw) {
 
 const SEED_USERS = [
   { id: 'u-admin', name: 'Administrator ReUse', username: 'admin', email: 'admin@reuse.id', phone: '6281100000001', location: 'Banda Aceh', role: 'admin', status: 'active', passwordHash: hashPassword('admin123'), avatar: '', createdAt: '2026-01-05T08:00:00.000Z' },
-  { id: 'u-seller1', name: 'Nadia Putri', username: 'nadia', email: 'nadia@reuse.id', phone: '6281234567890', location: 'Banda Aceh', role: 'seller', status: 'active', passwordHash: hashPassword('nadia123'), avatar: '', createdAt: '2026-02-11T09:15:00.000Z' },
-  { id: 'u-seller2', name: 'Fajar Ramadhan', username: 'rumahkedua', email: 'fajar@reuse.id', phone: '6281376543210', location: 'Aceh Besar', role: 'seller', status: 'active', passwordHash: hashPassword('fajar123'), avatar: '', createdAt: '2026-03-02T10:40:00.000Z' },
-  { id: 'u-seller3', name: 'Second Time Store', username: 'secondtime', email: 'secondtime@reuse.id', phone: '6285299887711', location: 'Banda Aceh', role: 'seller', status: 'active', passwordHash: hashPassword('second123'), avatar: '', createdAt: '2026-09-14T06:20:00.000Z' },
-  { id: 'u-customer1', name: 'Aisyah Humaira', username: 'aisyah', email: 'aisyah@reuse.id', phone: '6281166778899', location: 'Banda Aceh', role: 'customer', status: 'active', passwordHash: hashPassword('aisyah123'), avatar: '', createdAt: '2026-04-18T11:30:00.000Z' },
-  { id: 'u-customer2', name: 'Budi Santoso', username: 'budi', email: 'budi@reuse.id', phone: '6281366770011', location: 'Aceh Besar', role: 'customer', status: 'active', passwordHash: hashPassword('budi123'), avatar: '', createdAt: '2026-06-22T07:05:00.000Z' },
-  { id: 'u-customer3', name: 'Sari Dewi', username: 'sari', email: 'sari@reuse.id', phone: '6281155001122', location: 'Banda Aceh', role: 'customer', status: 'inactive', passwordHash: hashPassword('sari123'), avatar: '', createdAt: '2026-08-09T13:45:00.000Z' }
+  { id: 'u-seller1', name: 'Nadia Putri', username: 'nadia', email: 'nadia@reuse.id', phone: '6281234567890', location: 'Banda Aceh', role: 'member', status: 'active', passwordHash: hashPassword('nadia123'), avatar: '', createdAt: '2026-02-11T09:15:00.000Z' },
+  { id: 'u-seller2', name: 'Fajar Ramadhan', username: 'rumahkedua', email: 'fajar@reuse.id', phone: '6281376543210', location: 'Aceh Besar', role: 'member', status: 'active', passwordHash: hashPassword('fajar123'), avatar: '', createdAt: '2026-03-02T10:40:00.000Z' },
+  { id: 'u-seller3', name: 'Second Time Store', username: 'secondtime', email: 'secondtime@reuse.id', phone: '6285299887711', location: 'Banda Aceh', role: 'member', status: 'active', passwordHash: hashPassword('second123'), avatar: '', createdAt: '2026-09-14T06:20:00.000Z' },
+  { id: 'u-customer1', name: 'Aisyah Humaira', username: 'aisyah', email: 'aisyah@reuse.id', phone: '6281166778899', location: 'Banda Aceh', role: 'member', status: 'active', passwordHash: hashPassword('aisyah123'), avatar: '', createdAt: '2026-04-18T11:30:00.000Z' },
+  { id: 'u-customer2', name: 'Budi Santoso', username: 'budi', email: 'budi@reuse.id', phone: '6281366770011', location: 'Aceh Besar', role: 'member', status: 'active', passwordHash: hashPassword('budi123'), avatar: '', createdAt: '2026-06-22T07:05:00.000Z' },
+  { id: 'u-customer3', name: 'Sari Dewi', username: 'sari', email: 'sari@reuse.id', phone: '6281155001122', location: 'Banda Aceh', role: 'member', status: 'inactive', passwordHash: hashPassword('sari123'), avatar: '', createdAt: '2026-08-09T13:45:00.000Z' }
 ];
 
 const SEED_PRODUCTS = [
@@ -93,6 +93,15 @@ const DB = {
       this._set(KEYS.logs, []);
       this._set(KEYS.meta, { version: 2, introDone: false });
     }
+    // Migrasi v2.1: peran customer/seller digabung menjadi satu akun "member"
+    // (satu akun bisa membeli sekaligus menjual).
+    const allUsers = this._get(KEYS.users, []);
+    let migrated = false;
+    allUsers.forEach(u => {
+      if (u.role === 'customer' || u.role === 'seller') { u.role = 'member'; migrated = true; }
+    });
+    if (migrated) this._set(KEYS.users, allUsers);
+
     // Defensive: make sure every collection exists
     this._set(KEYS.cart, this._get(KEYS.cart, []));
     this._set(KEYS.wishlist, this._get(KEYS.wishlist, []));

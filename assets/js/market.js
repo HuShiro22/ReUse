@@ -283,7 +283,7 @@ function openSellerProfile(sellerId) {
     <div style="display:flex;gap:14px;align-items:center">
       ${avatarHtml(seller, 'lg')}
       <div><h2 style="margin:0">${safe(seller.name)}</h2>
-        <div class="small">@${safe(seller.username)} · ${seller.role === 'seller' ? 'Seller' : seller.role === 'admin' ? 'Administrator' : 'Customer'}</div>
+        <div class="small">@${safe(seller.username)} · ${seller.role === 'admin' ? 'Administrator' : 'Member'}</div>
         <div class="small">Bergabung ${fmtDate(seller.createdAt)}</div>
       </div>
     </div>
@@ -551,10 +551,11 @@ function renderPrivacy() {
 /* ---------------- Seller entry point ---------------- */
 function startSelling() {
   const user = Auth.currentUser();
-  if (!user) { toast('Daftar atau login sebagai seller untuk mulai menjual.', 'info'); navigate('/register'); return; }
-  if (user.role === 'seller') { pendingNewProduct = true; sellerTab = 'products'; navigate('/seller'); return; }
-  if (user.role === 'admin') { toast('Login sebagai seller untuk menambahkan produk.', 'info'); return; }
-  toast('Akun customer belum dapat menjual. Daftar akun seller untuk membuka Seller Dashboard.', 'info');
+  if (!user) { toast('Daftar atau login dulu untuk mulai menjual.', 'info'); navigate('/register'); return; }
+  if (user.role === 'admin') { toast('Akun administrator tidak menggunakan Seller Dashboard.', 'info'); return; }
+  pendingNewProduct = true;
+  sellerTab = 'products';
+  navigate('/seller');
 }
 
 function refreshGrids() {

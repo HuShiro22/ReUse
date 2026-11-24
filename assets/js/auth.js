@@ -71,7 +71,7 @@ const Auth = {
       email,
       phone: SEC.cleanText(payload.phone, 20),
       location: SEC.cleanText(payload.location, 80),
-      role: payload.role === 'seller' ? 'seller' : 'customer',
+      role: 'member',
       status: 'active',
       passwordHash: hashPassword(payload.password),
       avatar: '',
@@ -192,10 +192,11 @@ function renderRegister() {
         <a class="brand" href="#/"><span class="brand-mark">↻</span> ReUse</a>
         <span class="kicker" style="color:#a9c9ae">JOIN THE CIRCLE</span>
         <h2>Satu akun,<br>banyak kesempatan<br>kedua.</h2>
-        <p>Daftar sebagai Customer untuk berbelanja, atau sebagai Seller untuk mulai menjual barang yang tidak lagi kamu gunakan.</p>
+        <p>Satu akun untuk membeli sekaligus menjual. Kamu bisa berbelanja barang preloved dan mulai menjual barang yang tidak lagi digunakan kapan saja.</p>
         <ul>
           <li><span>✓</span> Gratis, tanpa biaya pendaftaran</li>
-          <li><span>✓</span> Produk seller melewati moderasi admin</li>
+          <li><span>✓</span> Tanpa memilih jenis akun — beli dan jual dalam satu akun</li>
+          <li><span>✓</span> Produk yang kamu jual melewati moderasi admin</li>
           <li><span>✓</span> Transaksi langsung dengan penjual via WhatsApp</li>
         </ul>
       </div>
@@ -231,20 +232,8 @@ function renderRegister() {
               </div>
             </div>
           </div>
-          <div class="field">
-            <label>Jenis akun</label>
-            <div style="display:flex;gap:10px;flex-wrap:wrap">
-              <label style="flex:1;min-width:150px;display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line);border-radius:11px;padding:11px;cursor:pointer;font-weight:600">
-                <input type="radio" name="role" value="customer" checked style="width:auto;margin-top:2px">
-                <span><strong style="display:block;color:var(--forest)">Customer</strong><small class="small">Mencari dan membeli barang</small></span>
-              </label>
-              <label style="flex:1;min-width:150px;display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line);border-radius:11px;padding:11px;cursor:pointer;font-weight:600">
-                <input type="radio" name="role" value="seller" style="width:auto;margin-top:2px">
-                <span><strong style="display:block;color:var(--forest)">Seller</strong><small class="small">Menjual barang &amp; kelola dashboard</small></span>
-              </label>
-            </div>
-          </div>
-          <button class="btn btn-primary btn-block" style="margin-top:8px" type="submit">Daftar sekarang</button>
+          <div class="hint">Satu akun untuk membeli dan menjual. Seller Dashboard bisa dibuka kapan saja setelah login — tidak perlu daftar ulang.</div>
+          <button class="btn btn-primary btn-block" style="margin-top:12px" type="submit">Daftar sekarang</button>
         </form>
         <p class="swap">Sudah punya akun? <a href="#/login">Login di sini</a></p>
         <div class="hint">Akun administrator tidak dapat dibuat melalui halaman ini. Gunakan halaman Admin Login.</div>
@@ -267,8 +256,7 @@ function handleRegister(e) {
     phone: SEC.cleanText(f.phone.value, 20),
     location: SEC.cleanText(f.location.value, 80),
     password: f.password.value,
-    confirm: f.confirm.value,
-    role: (f.querySelector('input[name="role"]:checked') || {}).value || 'customer'
+    confirm: f.confirm.value
   };
   if (data.name.length < 3) return markInvalid(f, 'name', 'Nama lengkap minimal 3 karakter.');
   if (!/^[a-zA-Z0-9._]{3,20}$/.test(data.username)) return markInvalid(f, 'username', 'Username 3–20 karakter, hanya huruf, angka, titik, atau garis bawah.');
@@ -316,7 +304,7 @@ function renderAdminLogin() {
       <div class="auth-card" style="background:#fff;padding:30px;border-radius:22px;box-shadow:var(--shadow-lg)">
         <a class="brand" href="#/" style="font-size:24px;margin-bottom:22px"><span class="brand-mark">↻</span> ReUse <span class="admin-tag" style="background:var(--soft);color:var(--forest)">ADMIN</span></a>
         <h1 style="font-size:26px">Admin Login</h1>
-        <p class="lead">Halaman khusus administrator dengan verifikasi dua faktor. Akun seller dan customer tidak dapat masuk di sini.</p>
+        <p class="lead">Halaman khusus administrator dengan verifikasi dua faktor. Akun member tidak dapat masuk di sini.</p>
         <div class="alert" id="adminAlert"></div>
         <form onsubmit="handleAdminLogin(event)" novalidate>
           <div class="field"><label for="adminUser">Username administrator</label><input id="adminUser" name="username" autocomplete="username" maxlength="50" placeholder="Username"></div>
@@ -521,14 +509,14 @@ function renderProfile() {
   const user = Auth.currentUser();
   if (!user) { navigate('/login'); return; }
   pendingAvatar = null;
-  const roleLabel = user.role === 'admin' ? 'Administrator' : user.role === 'seller' ? 'Seller' : 'Customer';
+  const roleLabel = user.role === 'admin' ? 'Administrator' : 'Member';
   const myProducts = DB.products().filter(p => p.sellerId === user.id);
   document.getElementById('app').innerHTML = `
   <div class="page"><div class="container">
     <div class="page-head">
       <div><span class="kicker">ACCOUNT SETTINGS</span><h1>Profil Saya</h1><p class="sub">Kelola informasi akun dan keamanan kamu.</p></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${user.role === 'seller' ? `<a class="btn btn-light btn-sm" href="#/seller">Seller Dashboard</a>` : ''}
+        ${user.role !== 'admin' ? `<a class="btn btn-light btn-sm" href="#/seller">Seller Dashboard</a>` : ''}
         ${user.role === 'admin' ? `<a class="btn btn-light btn-sm" href="#/admin">Admin Dashboard</a>` : ''}
         <button class="btn btn-outline btn-sm" onclick="requestLogout()">Logout</button>
       </div>
@@ -538,14 +526,14 @@ function renderProfile() {
         ${avatarHtml(user, 'lg')}
         <h2>${safe(user.name)}</h2>
         <div class="small">@${safe(user.username)}</div>
-        <div class="role"><span class="badge ${user.role === 'seller' ? 'badge-approved' : user.role === 'admin' ? 'badge-sold' : 'badge-pending'}">${roleLabel}</span>
+        <div class="role"><span class="badge ${user.role === 'admin' ? 'badge-sold' : 'badge-approved'}">${roleLabel}</span>
         <span class="badge ${user.status === 'active' ? 'badge-approved' : 'badge-rejected'}">${user.status === 'active' ? 'Aktif' : 'Nonaktif'}</span></div>
         <div class="profile-facts">
           <div><span>Email</span><b style="word-break:break-all;text-align:right">${safe(user.email)}</b></div>
           <div><span>WhatsApp</span><b>${safe(user.phone)}</b></div>
           <div><span>Lokasi</span><b>${safe(user.location)}</b></div>
           <div><span>Bergabung</span><b>${fmtDate(user.createdAt)}</b></div>
-          ${user.role === 'seller' ? `<div><span>Produk</span><b>${myProducts.length}</b></div>` : ''}
+          ${user.role !== 'admin' ? `<div><span>Produk</span><b>${myProducts.length}</b></div>` : ''}
         </div>
         <div style="margin-top:16px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
           <label class="btn btn-light btn-sm" style="cursor:pointer">Ganti Foto<input type="file" accept="image/*" onchange="onAvatarChange(event)" style="display:none"></label>
@@ -576,7 +564,7 @@ function profileInfoForm(user) {
         <div class="field"><label>Nomor WhatsApp</label><input name="phone" value="${safe(user.phone)}"></div>
       </div>
       <div class="field"><label>Lokasi</label><input name="location" value="${safe(user.location)}"></div>
-      <div class="field"><label>Jenis akun</label><input value="${user.role === 'seller' ? 'Seller' : user.role === 'admin' ? 'Administrator' : 'Customer'}" disabled></div>
+      <div class="field"><label>Jenis akun</label><input value="${user.role === 'admin' ? 'Administrator' : 'Member (bisa membeli & menjual)'}" disabled></div>
       <div class="small">Jenis akun tidak dapat diubah sendiri. Status akun: <b>${user.status === 'active' ? 'Aktif' : 'Nonaktif'}</b>.</div>
       <div class="modal-actions" style="justify-content:flex-start">
         <button class="btn btn-primary" type="submit">Simpan Perubahan</button>
