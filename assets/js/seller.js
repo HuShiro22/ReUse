@@ -26,12 +26,15 @@ function renderSeller() {
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         ${pending ? `<span class="badge badge-pending">${pending} produk menunggu review</span>` : ''}
         <button class="btn btn-primary" onclick="openProductForm()">＋ Add New Product</button>
+        <button class="btn btn-outline" onclick="setSellerTab('orders')">Pesanan Masuk${activeOrderCount(user.id, 'seller') ? ' (' + activeOrderCount(user.id, 'seller') + ')' : ''}</button>
         <a class="btn btn-outline" href="#/explore">Lihat Katalog</a>
       </div>
     </div>
+    <div style="margin:10px 0 0">${sellerTrustHtml(user.id)}</div>
     <div class="dash-tabs">
-      <button class="dash-tab ${sellerTab === 'overview' ? 'active' : ''}" onclick="setSellerTab('overview')">Overview</button>
-      <button class="dash-tab ${sellerTab === 'products' ? 'active' : ''}" onclick="setSellerTab('products')">My Products (${mine.length})</button>
+      <button class="dash-tab ${sellerTab === 'overview' ? 'active' : ''}" data-stab="overview" onclick="setSellerTab('overview')">Overview</button>
+      <button class="dash-tab ${sellerTab === 'products' ? 'active' : ''}" data-stab="products" onclick="setSellerTab('products')">My Products (${mine.length})</button>
+      <button class="dash-tab ${sellerTab === 'orders' ? 'active' : ''}" data-stab="orders" onclick="setSellerTab('orders')">Pesanan Masuk (${activeOrderCount(user.id, 'seller')})</button>
     </div>
   </div></div>
   <div class="page" style="padding-top:26px"><div class="container" id="sellerBody"></div></div>`;
@@ -44,7 +47,7 @@ function renderSeller() {
 
 function setSellerTab(tab) {
   sellerTab = tab;
-  document.querySelectorAll('.dash-tab').forEach((b, i) => b.classList.toggle('active', (i === 0 && tab === 'overview') || (i === 1 && tab === 'products')));
+  document.querySelectorAll('.dash-tab').forEach(b => b.classList.toggle('active', b.dataset.stab === tab));
   renderSellerBody();
 }
 
@@ -54,6 +57,7 @@ function renderSellerBody() {
   const user = Auth.currentUser();
   if (!user) return;
   if (sellerTab === 'overview') body.innerHTML = sellerOverviewHtml(user);
+  else if (sellerTab === 'orders') body.innerHTML = sellerOrdersHtml(user);
   else body.innerHTML = sellerProductsHtml(user);
 }
 
@@ -62,7 +66,7 @@ function sellerOverviewHtml(user) {
   const stat = (icon, label, value, cls) => `<div class="stat ${cls || ''}"><div class="stat-icon">${icon}</div><div><b>${value}</b><span>${label}</span></div></div>`;
   const total = mine.length;
   const active = mine.filter(p => p.status === 'approved').length;
-  const available = mine.filter(p => p.status === 'approved' && !p.sold).length;
+  const incoming = activeOrderCount(user.id, 'seller');
   const pending = mine.filter(p => p.status === 'pending').length;
   const rejected = mine.filter(p => p.status === 'rejected').length;
   const sold = mine.filter(p => p.sold).length;
@@ -74,7 +78,7 @@ function sellerOverviewHtml(user) {
       ${stat('◷', 'Menunggu Persetujuan', pending, 'warn')}
       ${stat('✕', 'Produk Ditolak', rejected, 'danger')}
       ${stat('⌂', 'Produk Terjual', sold)}
-      ${stat('◉', 'Jumlah Tersedia', available, 'ok')}
+      ${stat('◉', 'Pesanan Masuk', incoming, 'ok')}
     </div>
     <div class="seller-cols">
       <div class="card">
@@ -94,6 +98,7 @@ function sellerOverviewHtml(user) {
         <div style="display:grid;gap:8px;margin-top:14px">
           <button class="btn btn-primary btn-block" onclick="openProductForm()">＋ Tambah Produk Baru</button>
           <button class="btn btn-outline btn-block" onclick="setSellerTab('products')">Kelola My Products</button>
+          <button class="btn btn-outline btn-block" onclick="setSellerTab('orders')">Lihat Pesanan Masuk</button>
           <a class="btn btn-light btn-block" href="#/profile">Edit Profil Seller</a>
         </div>
       </div>
@@ -203,7 +208,7 @@ function openProductForm(id) {
         <div class="upload-row">
           <img id="productPreview" class="upload-preview" src="${existing ? safe(existing.image) : PLACEHOLDER}" alt="Pratinjau foto produk">
           <label class="btn btn-light btn-sm" style="cursor:pointer">Unggah Foto<input type="file" accept="image/*" style="display:none" onchange="onProductImage(event)"></label>
-          <span class="small">atau tempel URL di bawah (maks. 400 KB untuk unggahan).</span>
+          <span class="small">atau tempel URL di bawah. Foto otomatis dikompres agar hemat penyimpanan.</span>
         </div>
         <input name="image" maxlength="600" value="${existing ? safe(existing.image) : ''}" placeholder="https://..." style="margin-top:9px" oninput="document.getElementById('productPreview').src=this.value||'${PLACEHOLDER}'">
       </div>
@@ -219,20 +224,53 @@ function openProductForm(id) {
     </form>`, 'wide');
 }
 
+/* Kompres gambar ke JPEG maks. 1000 px agar muat di localStorage */
+function compressImage(file, maxSize, quality) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Gagal membaca file.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('File bukan gambar yang valid.'));
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, maxSize / Math.max(img.width || 1, img.height || 1));
+          const w = Math.max(1, Math.round(img.width * scale));
+          const h = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } catch (err) { reject(err); }
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function onProductImage(e) {
   const file = e.target.files && e.target.files[0];
   if (!file) return;
   if (!file.type.startsWith('image/')) { toast('File harus berupa gambar.', 'error'); return; }
-  if (file.size > 400 * 1024) { toast('Ukuran foto maksimal 400 KB.', 'error'); return; }
-  const reader = new FileReader();
-  reader.onload = () => {
-    pendingProductImage = reader.result;
-    const preview = document.getElementById('productPreview');
-    if (preview) preview.src = reader.result;
+  if (file.size > 5 * 1024 * 1024) { toast('Ukuran foto maksimal 5 MB.', 'error'); return; }
+  const preview = document.getElementById('productPreview');
+  if (preview) preview.style.opacity = '.5';
+  compressImage(file, 1000, 0.72).then(dataUrl => {
+    pendingProductImage = dataUrl;
+    const pv = document.getElementById('productPreview');
+    if (pv) { pv.src = dataUrl; pv.style.opacity = '1'; }
     const urlInput = document.querySelector('#modalBody input[name="image"]');
     if (urlInput) urlInput.value = '';
-  };
-  reader.readAsDataURL(file);
+    toast('Foto siap digunakan (' + Math.round(dataUrl.length / 1024) + ' KB setelah dikompres).', 'info');
+  }).catch(err => {
+    console.error(err);
+    if (preview) preview.style.opacity = '1';
+    toast('Foto gagal diproses. Coba file lain.', 'error');
+  });
 }
 
 function saveProduct(e, id) {
@@ -275,6 +313,10 @@ function saveProduct(e, id) {
       updatedAt: now
     });
     DB.saveProducts(products);
+    if (!DB.productById(id) || DB.productById(id).updatedAt !== now) {
+      setAlert('productAlert', 'error', 'Penyimpanan browser penuh. Gunakan foto yang lebih kecil atau tempel URL gambar.');
+      return;
+    }
     closeModal();
     toast(wasRejected ? 'Produk diperbarui dan dikirim ulang untuk ditinjau admin.' : 'Produk berhasil diperbarui.', 'success');
   } else {
@@ -285,6 +327,11 @@ function saveProduct(e, id) {
     };
     products.unshift(product);
     DB.saveProducts(products);
+    if (!DB.productById(product.id)) {
+      setAlert('productAlert', 'error', 'Penyimpanan browser penuh. Gunakan foto yang lebih kecil atau tempel URL gambar.');
+      return;
+    }
+    notify(user.id, 'Produk "' + name + '" berhasil diunggah dan menunggu persetujuan admin.', '/seller', 'product');
     closeModal();
     toast('Produk berhasil ditambahkan dan menunggu persetujuan admin.', 'success');
   }

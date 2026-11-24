@@ -350,6 +350,7 @@ function approveProduct(id) {
   products[idx].updatedAt = new Date().toISOString();
   DB.saveProducts(products);
   logAdmin('approve_product', 'Menyetujui produk "' + p.name + '" milik ' + ((DB.userById(p.sellerId) || {}).name || 'seller') + '.');
+  notify(p.sellerId, 'Produk "' + p.name + '" disetujui dan sudah tampil di katalog.', '/seller', 'product');
   toast('Produk berhasil disetujui dan tampil di katalog.', 'success');
   renderAdmin(location.hash.replace(/^#/, '') || '/admin');
   refreshGrids();
@@ -385,6 +386,7 @@ function submitRejectProduct(e, id) {
   products[idx].updatedAt = new Date().toISOString();
   DB.saveProducts(products);
   logAdmin('reject_product', 'Menolak produk "' + products[idx].name + '". Alasan: ' + reason);
+  notify(products[idx].sellerId, 'Produk "' + products[idx].name + '" ditolak admin. Alasan: ' + reason, '/seller', 'product');
   closeModal();
   toast('Produk ditolak. Seller dapat melihat alasannya.', 'info');
   renderAdmin(location.hash.replace(/^#/, '') || '/admin');
@@ -408,6 +410,7 @@ function removeProductAdmin(id) {
     products[idx].updatedAt = new Date().toISOString();
     DB.saveProducts(products);
     logAdmin('remove_product', 'Menonaktifkan produk "' + p.name + '".');
+    notify(p.sellerId, 'Produk "' + p.name + '" dinonaktifkan admin dan tidak tampil di katalog.', '/seller', 'product');
     toast('Produk dinonaktifkan.', 'info');
     renderAdmin(location.hash.replace(/^#/, '') || '/admin');
     refreshGrids();
@@ -438,7 +441,7 @@ function deleteProductAdmin(id) {
 /* ---------------- Admin users ---------------- */
 function adminUsersHtml() {
   return `
-    <div class="admin-section-title"><div><h2>User Management</h2><p>Lihat seluruh akun terdaftar dan atur statusnya.</p></div>
+    <div class="admin-section-title"><div><h2>User Management</h2><p>Lihat seluruh akun, verifikasi penjual, dan tangguhkan akun bermasalah beserta alasannya.</p></div>
       <span class="small" id="adminUserCount"></span></div>
     <div class="admin-table-tools">
       <div class="search"><span>⌕</span><input id="adminUserSearch" type="search" value="${safe(adminUserFilters.q)}" placeholder="Cari nama, username, atau email..." oninput="adminUserFilters.q=this.value;renderAdminUserTable()"></div>
@@ -477,14 +480,14 @@ function adminUserTableHtml() {
         <td style="white-space:nowrap">${safe(u.phone)}</td>
         <td><span class="badge ${u.role === 'admin' ? 'badge-sold' : 'badge-approved'}">${u.role === 'admin' ? 'Administrator' : 'Member'}</span></td>
         <td style="white-space:nowrap">${fmtDate(u.createdAt)}</td>
-        <td><span class="badge ${u.status === 'active' ? 'badge-approved' : 'badge-rejected'}">${u.status === 'active' ? 'Aktif' : 'Nonaktif'}</span></td>
+        <td><span class="badge ${userActive(u) ? 'badge-approved' : 'badge-rejected'}">${userStatusText(u)}</span>${u.statusReason && !userActive(u) ? `<div class="small" style="max-width:190px;margin-top:4px">${safe(u.statusReason)}</div>` : ''}</td>
         <td><div class="row-actions">
           <button class="btn btn-light btn-sm" onclick="openAdminUser('${u.id}')">Detail</button>
           ${u.role === 'admin'
             ? '<button class="btn btn-outline btn-sm" disabled title="Akun administrator dilindungi">Dilindungi</button>'
-            : (u.status === 'active'
-              ? `<button class="btn btn-danger btn-sm" onclick="toggleUserStatus('${u.id}')">Nonaktifkan</button>`
-              : `<button class="btn btn-primary btn-sm" onclick="toggleUserStatus('${u.id}')">Aktifkan</button>`)}
+            : (userActive(u)
+              ? `<button class="btn btn-danger btn-sm" onclick="openSuspendUser('${u.id}')">Suspend</button>`
+              : `<button class="btn btn-primary btn-sm" onclick="activateUser('${u.id}')">Aktifkan</button>`)}
         </div></td>
       </tr>`).join('')}</tbody></table></div>`;
 }
@@ -504,28 +507,96 @@ function openAdminUser(id) {
       <div><b>WhatsApp:</b> ${safe(u.phone)}</div>
       <div><b>Lokasi:</b> ${safe(u.location)}</div>
       <div><b>Terdaftar:</b> ${fmtDate(u.createdAt)}</div>
-      <div><b>Status akun:</b> ${u.status === 'active' ? 'Aktif' : 'Nonaktif'}</div>
+      <div><b>Status akun:</b> ${userStatusText(u)}${u.statusReason && !userActive(u) ? ' — ' + safe(u.statusReason) : ''}</div>
+      <div><b>Verifikasi WhatsApp:</b> ${u.verified ? 'Terverifikasi' : 'Belum terverifikasi'}</div>
       <div><b>Total produk:</b> ${products.length} (${products.filter(p => p.status === 'approved').length} approved)</div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal()">Tutup</button>
-      ${u.role !== 'admin' ? `<button class="btn ${u.status === 'active' ? 'btn-danger' : 'btn-primary'}" onclick="toggleUserStatus('${u.id}');closeModal()">${u.status === 'active' ? 'Nonaktifkan Akun' : 'Aktifkan Akun'}</button>` : '<button class="btn btn-outline" disabled>Akun administrator dilindungi</button>'}
+      ${u.role !== 'admin' && !u.verified ? `<button class="btn btn-light" onclick="verifyUser('${u.id}');closeModal()">Tandai Terverifikasi</button>` : ''}
+      ${u.role !== 'admin' ? `<button class="btn ${userActive(u) ? 'btn-danger' : 'btn-primary'}" onclick="closeModal();${userActive(u) ? 'openSuspendUser' : 'activateUser'}('${u.id}')">${userActive(u) ? 'Suspend Akun' : 'Aktifkan Akun'}</button>` : '<button class="btn btn-outline" disabled>Akun administrator dilindungi</button>'}
     </div>`, 'small');
 }
 
-function toggleUserStatus(id) {
+function openSuspendUser(id, presetReason, returnPath) {
+  const admin = requireAdmin();
+  const u = DB.userById(id);
+  if (!admin || !u) return;
+  if (u.role === 'admin') { toast('Akun administrator tidak dapat ditangguhkan.', 'error'); return; }
+  openModal(`
+    <h2>Tangguhkan Akun</h2>
+    <p class="modal-sub">${safe(u.name)} (@${safe(u.username)}) tidak akan bisa login selama masa penangguhan. Akun dapat diaktifkan kembali kapan saja.</p>
+    <div class="alert" id="suspendAlert"></div>
+    <form onsubmit="submitSuspendUser(event, '${u.id}', '${safe(returnPath || '')}')">
+      <div class="field"><label>Durasi penangguhan</label>
+        <select name="days">
+          <option value="1">1 hari</option>
+          <option value="7" selected>7 hari</option>
+          <option value="30">30 hari</option>
+          <option value="0">Permanen (tanpa batas)</option>
+        </select>
+      </div>
+      <div class="field"><label>Alasan penangguhan</label><textarea name="reason" maxlength="300" required placeholder="Contoh: Terbukti melakukan penipuan pada transaksi.">${safe(presetReason || '')}</textarea></div>
+      <div class="hint warn">Alasan akan ditampilkan kepada pemilik akun saat mencoba login dan pada panel pengguna.</div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" type="button" onclick="closeModal()">Batal</button>
+        <button class="btn btn-danger" type="submit">Tangguhkan Akun</button>
+      </div>
+    </form>`, 'small');
+}
+
+function submitSuspendUser(e, id, returnPath) {
+  e.preventDefault();
+  const admin = requireAdmin();
+  if (!admin) return;
+  const reason = SEC.cleanText(e.target.reason.value, 300);
+  const days = Number(e.target.days.value);
+  if (reason.length < 5) { setAlert('suspendAlert', 'error', 'Alasan penangguhan minimal 5 karakter.'); return; }
+  const users = DB.users();
+  const idx = users.findIndex(u => u.id === id);
+  if (idx < 0 || users[idx].role === 'admin') return;
+  users[idx].status = 'inactive';
+  users[idx].statusReason = reason;
+  users[idx].statusChangedAt = new Date().toISOString();
+  users[idx].suspendedUntil = days > 0 ? new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString() : null;
+  DB.saveUsers(users);
+  notify(id, 'Akun kamu ditangguhkan' + (days > 0 ? ' selama ' + days + ' hari' : '') + '. Alasan: ' + reason, '/profile', 'account');
+  logAdmin('suspend_user', 'Menangguhkan akun ' + users[idx].name + ' (@' + users[idx].username + ')' + (days > 0 ? ' selama ' + days + ' hari' : ' permanen') + '. Alasan: ' + reason);
+  SEC.log('account_suspended', 'Akun @' + users[idx].username + ' ditangguhkan oleh administrator.');
+  closeModal();
+  toast('Akun ' + users[idx].name + ' ditangguhkan.', 'success');
+  if (returnPath) renderAdmin(returnPath);
+  else renderAdmin(location.hash.replace(/^#/, '') || '/admin');
+}
+
+function activateUser(id) {
   const admin = requireAdmin();
   if (!admin) return;
   const users = DB.users();
   const idx = users.findIndex(u => u.id === id);
   if (idx < 0) return;
-  if (users[idx].role === 'admin') { toast('Akun administrator tidak dapat dinonaktifkan dari pengelolaan pengguna.', 'error'); return; }
-  if (users[idx].id === admin.id) { toast('Kamu tidak dapat menonaktifkan akun sendiri.', 'error'); return; }
-  const next = users[idx].status === 'active' ? 'inactive' : 'active';
-  users[idx].status = next;
+  users[idx].status = 'active';
+  users[idx].suspendedUntil = null;
+  users[idx].statusReason = '';
+  users[idx].statusChangedAt = new Date().toISOString();
   DB.saveUsers(users);
-  logAdmin(next === 'inactive' ? 'deactivate_user' : 'activate_user', (next === 'inactive' ? 'Menonaktifkan' : 'Mengaktifkan') + ' akun ' + users[idx].name + ' (@' + users[idx].username + ').');
-  toast('Status akun ' + users[idx].name + ' diubah menjadi ' + (next === 'inactive' ? 'nonaktif' : 'aktif') + '.', 'success');
+  notify(id, 'Akun kamu sudah aktif kembali. Kamu bisa login seperti biasa.', '/profile', 'account');
+  logAdmin('activate_user', 'Mengaktifkan kembali akun ' + users[idx].name + ' (@' + users[idx].username + ').');
+  toast('Akun ' + users[idx].name + ' diaktifkan kembali.', 'success');
+  renderAdmin(location.hash.replace(/^#/, '') || '/admin');
+}
+
+function verifyUser(id) {
+  const admin = requireAdmin();
+  if (!admin) return;
+  const users = DB.users();
+  const idx = users.findIndex(u => u.id === id);
+  if (idx < 0) return;
+  users[idx].verified = true;
+  DB.saveUsers(users);
+  notify(id, 'Nomor WhatsApp kamu sudah diverifikasi admin. Badge terverifikasi kini tampil di profil dan produkmu.', '/profile', 'account');
+  logAdmin('verify_user', 'Menandai akun ' + users[idx].name + ' (@' + users[idx].username + ') sebagai terverifikasi.');
+  toast('Akun ditandai terverifikasi.', 'success');
   renderAdmin(location.hash.replace(/^#/, '') || '/admin');
 }
 
@@ -670,7 +741,7 @@ function adminReportsHtml() {
           ${r.status !== 'resolved' ? `<button class="btn btn-primary btn-sm" onclick="setReportStatus('${r.id}','resolved')">Selesaikan</button>` : ''}
           ${r.status !== 'rejected' ? `<button class="btn btn-outline btn-sm" onclick="setReportStatus('${r.id}','rejected')">Tolak Laporan</button>` : ''}
           ${product && product.status !== 'removed' ? `<button class="btn btn-danger btn-sm" onclick="reportRemoveProduct('${r.id}')">Nonaktifkan Produk</button>` : ''}
-          ${owner && owner.role !== 'admin' && owner.status === 'active' ? `<button class="btn btn-danger btn-sm" onclick="reportDeactivateOwner('${r.id}')">Nonaktifkan Akun Penjual</button>` : ''}
+          ${owner && owner.role !== 'admin' && userActive(owner) ? `<button class="btn btn-danger btn-sm" onclick="reportDeactivateOwner('${r.id}')">Tangguhkan Penjual</button>` : ''}
         </div>
       </div>`;
     }).join('')}</div>` : '<div class="table-wrap"><div class="empty" style="padding:44px">Belum ada laporan masuk.</div></div>'}`;
@@ -725,22 +796,8 @@ function reportDeactivateOwner(reportId) {
   if (!report || !report.productId) return;
   const product = DB.productById(report.productId);
   const owner = product ? DB.userById(product.sellerId) : null;
-  if (!owner || owner.role === 'admin') { toast('Akun penjual tidak dapat dinonaktifkan.', 'error'); return; }
-  confirmDialog({
-    title: 'Nonaktifkan akun penjual?',
-    message: 'Akun ' + owner.name + ' (@' + owner.username + ') akan dinonaktifkan dan tidak dapat login.',
-    confirmText: 'Nonaktifkan Akun',
-    danger: true
-  }).then(ok => {
-    if (!ok) return;
-    const users = DB.users();
-    const idx = users.findIndex(u => u.id === owner.id);
-    users[idx].status = 'inactive';
-    DB.saveUsers(users);
-    logAdmin('deactivate_user', 'Menonaktifkan akun ' + owner.name + ' terkait laporan "' + report.reason + '".');
-    toast('Akun seller dinonaktifkan.', 'success');
-    renderAdmin('/admin/reports');
-  });
+  if (!owner || owner.role === 'admin') { toast('Akun penjual tidak dapat ditangguhkan.', 'error'); return; }
+  openSuspendUser(owner.id, 'Terkait laporan: ' + report.reason, '/admin/reports');
 }
 
 /* ---------------- Admin activity log ---------------- */

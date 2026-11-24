@@ -15,7 +15,7 @@ const Auth = {
       return null;
     }
     const u = DB.userById(s.userId);
-    if (!u || u.status !== 'active') { DB.saveSession(null); return null; }
+    if (!u || !userActive(u)) { DB.saveSession(null); return null; }
     return u;
   },
   /* Verifikasi kredensial + rate limit, tanpa membuat sesi. */
@@ -37,7 +37,12 @@ const Auth = {
       }
       return { ok: false, error: 'Email/username atau password salah. Sisa percobaan: ' + state.attemptsLeft + '.' };
     }
-    if (user.status !== 'active') return { ok: false, error: 'Akun kamu sedang dinonaktifkan. Hubungi administrator ReUse.' };
+    if (!userActive(user)) {
+      const until = user.suspendedUntil && new Date(user.suspendedUntil).getTime() > Date.now()
+        ? ' hingga ' + fmtDate(user.suspendedUntil) : '';
+      const reason = user.statusReason ? ' Alasan: ' + user.statusReason + (/[.!?]$/.test(user.statusReason) ? '' : '.') : '';
+      return { ok: false, error: 'Akun kamu sedang ditangguhkan' + until + '.' + reason + ' Hubungi administrator ReUse.' };
+    }
     return { ok: true, user };
   },
   startSession(user) {
@@ -73,6 +78,7 @@ const Auth = {
       location: SEC.cleanText(payload.location, 80),
       role: 'member',
       status: 'active',
+      verified: false,
       passwordHash: hashPassword(payload.password),
       avatar: '',
       createdAt: new Date().toISOString()
@@ -511,12 +517,17 @@ function renderProfile() {
   pendingAvatar = null;
   const roleLabel = user.role === 'admin' ? 'Administrator' : 'Member';
   const myProducts = DB.products().filter(p => p.sellerId === user.id);
+  const stats = user.role === 'admin' ? null : sellerStats(user.id);
+  const buyCount = ordersFor(user.id, 'buyer').length;
+  const sellOrders = ordersFor(user.id, 'seller').length;
   document.getElementById('app').innerHTML = `
   <div class="page"><div class="container">
     <div class="page-head">
       <div><span class="kicker">ACCOUNT SETTINGS</span><h1>Profil Saya</h1><p class="sub">Kelola informasi akun dan keamanan kamu.</p></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${user.role !== 'admin' ? `<a class="btn btn-light btn-sm" href="#/seller">Seller Dashboard</a>` : ''}
+        ${user.role !== 'admin' ? `<a class="btn btn-light btn-sm" href="#/orders">Pesanan Saya</a>
+        <a class="btn btn-light btn-sm" href="#/chat">Pesan</a>
+        <a class="btn btn-light btn-sm" href="#/seller">Seller Dashboard</a>` : ''}
         ${user.role === 'admin' ? `<a class="btn btn-light btn-sm" href="#/admin">Admin Dashboard</a>` : ''}
         <button class="btn btn-outline btn-sm" onclick="requestLogout()">Logout</button>
       </div>
@@ -527,17 +538,23 @@ function renderProfile() {
         <h2>${safe(user.name)}</h2>
         <div class="small">@${safe(user.username)}</div>
         <div class="role"><span class="badge ${user.role === 'admin' ? 'badge-sold' : 'badge-approved'}">${roleLabel}</span>
-        <span class="badge ${user.status === 'active' ? 'badge-approved' : 'badge-rejected'}">${user.status === 'active' ? 'Aktif' : 'Nonaktif'}</span></div>
+        <span class="badge ${userActive(user) ? 'badge-approved' : 'badge-rejected'}">${userStatusText(user)}</span>
+        ${user.verified ? '<span class="badge badge-verified">✓ Terverifikasi</span>' : ''}</div>
+        ${user.statusReason && !userActive(user) ? `<div class="hint warn" style="margin-top:12px;text-align:left">Alasan penangguhan: ${safe(user.statusReason)}</div>` : ''}
         <div class="profile-facts">
           <div><span>Email</span><b style="word-break:break-all;text-align:right">${safe(user.email)}</b></div>
           <div><span>WhatsApp</span><b>${safe(user.phone)}</b></div>
           <div><span>Lokasi</span><b>${safe(user.location)}</b></div>
           <div><span>Bergabung</span><b>${fmtDate(user.createdAt)}</b></div>
-          ${user.role !== 'admin' ? `<div><span>Produk</span><b>${myProducts.length}</b></div>` : ''}
+          ${user.role !== 'admin' ? `<div><span>Produk</span><b>${myProducts.length}</b></div>
+          <div><span>Pembelian</span><b>${buyCount} · ${ordersFor(user.id, 'buyer').filter(o => o.status === 'completed').length} selesai</b></div>
+          <div><span>Penjualan</span><b>${sellOrders} · ${ordersFor(user.id, 'seller').filter(o => o.status === 'completed').length} selesai</b></div>
+          <div><span>Rating</span><b>${stats.count ? stats.rating.toFixed(1) + ' (' + stats.count + ' ulasan)' : 'Belum ada'}</b></div>` : ''}
         </div>
         <div style="margin-top:16px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
           <label class="btn btn-light btn-sm" style="cursor:pointer">Ganti Foto<input type="file" accept="image/*" onchange="onAvatarChange(event)" style="display:none"></label>
           ${user.avatar ? `<button class="btn btn-outline btn-sm" onclick="removeAvatar()">Hapus Foto</button>` : ''}
+          ${user.role !== 'admin' && !user.verified ? `<button class="btn btn-primary btn-sm" onclick="verifyWhatsapp()">✓ Verifikasi WhatsApp</button>` : ''}
         </div>
       </div>
       <div class="card">
@@ -565,7 +582,7 @@ function profileInfoForm(user) {
       </div>
       <div class="field"><label>Lokasi</label><input name="location" value="${safe(user.location)}"></div>
       <div class="field"><label>Jenis akun</label><input value="${user.role === 'admin' ? 'Administrator' : 'Member (bisa membeli & menjual)'}" disabled></div>
-      <div class="small">Jenis akun tidak dapat diubah sendiri. Status akun: <b>${user.status === 'active' ? 'Aktif' : 'Nonaktif'}</b>.</div>
+      <div class="small">Jenis akun tidak dapat diubah sendiri. Status akun: <b>${userStatusText(user)}</b>.</div>
       <div class="modal-actions" style="justify-content:flex-start">
         <button class="btn btn-primary" type="submit">Simpan Perubahan</button>
         <button class="btn btn-outline" type="button" onclick="renderProfile()">Reset</button>
@@ -593,6 +610,26 @@ function showProfileTab(tab) {
   } else {
     body.innerHTML = profileInfoForm(user);
   }
+}
+
+function verifyWhatsapp() {
+  const user = Auth.currentUser();
+  if (!user || user.role === 'admin') return;
+  confirmDialog({
+    title: 'Verifikasi nomor WhatsApp?',
+    message: 'Demo: konfirmasi bahwa nomor ' + user.phone + ' benar milikmu. Pada produksi, langkah ini dikirim lewat kode OTP ke WhatsApp.',
+    confirmText: 'Ya, Verifikasi',
+    cancelText: 'Batal'
+  }).then(ok => {
+    if (!ok) return;
+    const users = DB.users();
+    const idx = users.findIndex(u => u.id === user.id);
+    users[idx].verified = true;
+    DB.saveUsers(users);
+    SEC.log('whatsapp_verified', 'Nomor WhatsApp @' + user.username + ' diverifikasi.');
+    toast('Nomor WhatsApp berhasil diverifikasi.', 'success');
+    renderProfile();
+  });
 }
 
 function onAvatarChange(e) {

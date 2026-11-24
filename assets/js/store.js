@@ -15,7 +15,11 @@ const KEYS = {
   session: 'reuse_v2_session',
   meta: 'reuse_v2_meta',
   attempts: 'reuse_v2_login_attempts',
-  securityLogs: 'reuse_v2_security_logs'
+  securityLogs: 'reuse_v2_security_logs',
+  orders: 'reuse_v2_orders',
+  threads: 'reuse_v2_threads',
+  reviews: 'reuse_v2_reviews',
+  notify: 'reuse_v2_notifications'
 };
 
 const PLACEHOLDER = 'https://placehold.co/600x450/e9efe8/244c3a?text=ReUse';
@@ -67,6 +71,24 @@ const SEED_CATEGORIES = [
   { id: 'cat-accessories', name: 'Accessories & Collectibles', icon: '◇' }
 ];
 
+/* Demo seed untuk transaksi, ulasan, chat, dan notifikasi */
+const SEED_ORDERS = [
+  { id: 'o-1', productId: 'p-5', buyerId: 'u-customer1', sellerId: 'u-seller1', price: 85000, quantity: 1, status: 'completed', note: 'Ambil langsung di Banda Aceh ya.', declineReason: '', createdAt: '2026-11-18T04:10:00.000Z', updatedAt: '2026-11-19T09:00:00.000Z', completedAt: '2026-11-19T09:00:00.000Z', reviewId: 'rv-1' },
+  { id: 'o-2', productId: 'p-4', buyerId: 'u-customer1', sellerId: 'u-seller2', price: 65000, quantity: 1, status: 'pending', note: '', declineReason: '', createdAt: '2026-11-22T08:30:00.000Z', updatedAt: '2026-11-22T08:30:00.000Z', completedAt: null, reviewId: null }
+];
+const SEED_REVIEWS = [
+  { id: 'rv-1', orderId: 'o-1', productId: 'p-5', sellerId: 'u-seller1', buyerId: 'u-customer1', rating: 5, comment: 'Lampunya berfungsi baik dan penjual responsif. Terima kasih!', createdAt: '2026-11-19T10:05:00.000Z' }
+];
+const SEED_THREADS = [
+  { id: 't-1', productId: 'p-7', buyerId: 'u-customer1', sellerId: 'u-seller3', unread: {}, updatedAt: '2026-11-21T12:00:00.000Z', messages: [
+    { id: 'm-1', senderId: 'u-customer1', type: 'text', text: 'Halo, headphone-nya masih ada?', at: '2026-11-21T11:50:00.000Z' },
+    { id: 'm-2', senderId: 'u-seller3', type: 'text', text: 'Masih ada kak. Bisa COD di Banda Aceh.', at: '2026-11-21T12:00:00.000Z' }
+  ] }
+];
+const SEED_NOTIFS = [
+  { id: 'n-1', userId: 'u-customer1', text: 'Pesanan "Buku Atomic Habits" menunggu konfirmasi penjual.', link: '/orders', type: 'order', read: false, at: '2026-11-22T08:30:00.000Z' }
+];
+
 const DB = {
   _get(key, fallback) {
     try {
@@ -91,7 +113,11 @@ const DB = {
         status: 'open', createdAt: '2026-11-21T09:30:00.000Z'
       }]);
       this._set(KEYS.logs, []);
-      this._set(KEYS.meta, { version: 2, introDone: false });
+      this._set(KEYS.orders, SEED_ORDERS);
+      this._set(KEYS.threads, SEED_THREADS);
+      this._set(KEYS.reviews, SEED_REVIEWS);
+      this._set(KEYS.notify, SEED_NOTIFS);
+      this._set(KEYS.meta, { version: 2, introDone: false, tradeSeed: true });
     }
     // Migrasi v2.1: peran customer/seller digabung menjadi satu akun "member"
     // (satu akun bisa membeli sekaligus menjual).
@@ -99,6 +125,11 @@ const DB = {
     let migrated = false;
     allUsers.forEach(u => {
       if (u.role === 'customer' || u.role === 'seller') { u.role = 'member'; migrated = true; }
+      if (u.verified === undefined) { u.verified = !!u.phone && u.role !== 'admin'; migrated = true; }
+      // Buka kembali akun yang masa penangguhannya sudah berakhir
+      if (u.status === 'inactive' && u.suspendedUntil && new Date(u.suspendedUntil).getTime() <= Date.now()) {
+        u.status = 'active'; u.suspendedUntil = null; u.statusReason = ''; migrated = true;
+      }
     });
     if (migrated) this._set(KEYS.users, allUsers);
 
@@ -108,9 +139,22 @@ const DB = {
     this._set(KEYS.reports, this._get(KEYS.reports, []));
     this._set(KEYS.logs, this._get(KEYS.logs, []));
     this._set(KEYS.categories, this._get(KEYS.categories, SEED_CATEGORIES));
-    this._set(KEYS.meta, Object.assign({ version: 2, introDone: false }, this._get(KEYS.meta, {})));
     this._set(KEYS.attempts, this._get(KEYS.attempts, {}));
     this._set(KEYS.securityLogs, this._get(KEYS.securityLogs, []));
+    this._set(KEYS.orders, this._get(KEYS.orders, []));
+    this._set(KEYS.threads, this._get(KEYS.threads, []));
+    this._set(KEYS.reviews, this._get(KEYS.reviews, []));
+    this._set(KEYS.notify, this._get(KEYS.notify, []));
+    const meta = Object.assign({ version: 2, introDone: false }, this._get(KEYS.meta, {}));
+    // Isi data contoh transaksi sekali saja (instalasi lama ikut mendapat contoh)
+    if (!meta.tradeSeed) {
+      if (!this._get(KEYS.orders, []).length) this._set(KEYS.orders, SEED_ORDERS);
+      if (!this._get(KEYS.reviews, []).length) this._set(KEYS.reviews, SEED_REVIEWS);
+      if (!this._get(KEYS.threads, []).length) this._set(KEYS.threads, SEED_THREADS);
+      if (!this._get(KEYS.notify, []).length) this._set(KEYS.notify, SEED_NOTIFS);
+      meta.tradeSeed = true;
+    }
+    this._set(KEYS.meta, meta);
   },
   users() { return this._get(KEYS.users, []); },
   saveUsers(v) { this._set(KEYS.users, v); },
@@ -124,6 +168,14 @@ const DB = {
   saveReports(v) { this._set(KEYS.reports, v); },
   logs() { return this._get(KEYS.logs, []); },
   saveLogs(v) { this._set(KEYS.logs, v); },
+  orders() { return this._get(KEYS.orders, []); },
+  saveOrders(v) { this._set(KEYS.orders, v); },
+  threads() { return this._get(KEYS.threads, []); },
+  saveThreads(v) { this._set(KEYS.threads, v); },
+  reviews() { return this._get(KEYS.reviews, []); },
+  saveReviews(v) { this._set(KEYS.reviews, v); },
+  notify() { return this._get(KEYS.notify, []); },
+  saveNotify(v) { this._set(KEYS.notify, v); },
   categories() { return this._get(KEYS.categories, []); },
   saveCategories(v) { this._set(KEYS.categories, v); },
   session() { return this._get(KEYS.session, null); },
@@ -151,6 +203,17 @@ function fmtDateTime(iso) {
   if (isNaN(d)) return '-';
   return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) + ' · ' +
     d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+}
+/* Akun dianggap aktif bila status active atau masa suspend sudah lewat */
+function userActive(user) {
+  if (!user) return false;
+  if (user.status === 'active') return true;
+  return !!(user.suspendedUntil && new Date(user.suspendedUntil).getTime() <= Date.now());
+}
+function userStatusText(user) {
+  if (!user) return '-';
+  if (userActive(user)) return 'Aktif';
+  return user.suspendedUntil ? 'Ditangguhkan hingga ' + fmtDate(user.suspendedUntil) : 'Ditangguhkan';
 }
 function initials(name) {
   const parts = String(name || '?').trim().split(/\s+/).slice(0, 2);
@@ -189,6 +252,14 @@ function removeProductEverywhere(productId) {
   DB.saveProducts(DB.products().filter(p => p.id !== productId));
   DB.saveCart(DB.cart().filter(c => c.productId !== productId));
   DB.saveWishlist(DB.wishlist().filter(w => w.productId !== productId));
+  const orders = DB.orders();
+  let ordersChanged = false;
+  orders.forEach(o => {
+    if (o.productId === productId && (o.status === 'pending' || o.status === 'accepted')) {
+      o.status = 'cancelled'; o.updatedAt = new Date().toISOString(); ordersChanged = true;
+    }
+  });
+  if (ordersChanged) DB.saveOrders(orders);
   const reports = DB.reports();
   let changed = false;
   reports.forEach(r => { if (r.productId === productId) { r.productId = null; changed = true; } });

@@ -98,7 +98,12 @@ function renderHome() {
     <div class="toolbar">
       <div class="search"><span>⌕</span><input id="homeSearch" type="search" placeholder="Cari nama produk atau merek..." oninput="renderHomeGrid()"></div>
       <select id="homeCondition" onchange="renderHomeGrid()"><option value="">Semua kondisi</option>${CONDITIONS.map(c => `<option>${c}</option>`).join('')}</select>
+      <select id="homeLocation" onchange="renderHomeGrid()">${locationOptions('')}</select>
       <select id="homeSort" onchange="renderHomeGrid()"><option value="newest">Terbaru</option><option value="low">Harga terendah</option><option value="high">Harga tertinggi</option><option value="name">Nama A–Z</option></select>
+    </div>
+    <div class="toolbar price-range">
+      <input id="homeMin" type="number" min="0" step="10000" placeholder="Harga min (Rp)" oninput="renderHomeGrid()">
+      <input id="homeMax" type="number" min="0" step="10000" placeholder="Harga maks (Rp)" oninput="renderHomeGrid()">
     </div>
     <div class="products" id="homeGrid"></div>
     <div style="text-align:center;margin-top:22px"><a class="btn btn-outline" href="#/explore">Lihat semua produk →</a></div>
@@ -137,11 +142,18 @@ function renderHomeGrid() {
   if (!grid) return;
   const q = (document.getElementById('homeSearch').value || '').toLowerCase().trim();
   const cond = document.getElementById('homeCondition').value;
+  const loc = document.getElementById('homeLocation').value;
+  const min = document.getElementById('homeMin').value;
+  const max = document.getElementById('homeMax').value;
   const sort = document.getElementById('homeSort').value;
   let list = approvedProducts().filter(p => {
     const seller = sellerOf(p);
     const hay = (p.name + ' ' + p.category + ' ' + (seller ? seller.name : '')).toLowerCase();
-    return (!homeCategory || p.category === homeCategory) && (!cond || p.condition === cond) && (!q || hay.includes(q));
+    return (!homeCategory || p.category === homeCategory)
+      && (!cond || p.condition === cond)
+      && (!loc || p.location === loc)
+      && (!q || hay.includes(q))
+      && productInPriceRange(p, min, max);
   });
   if (sort === 'low') list.sort((a, b) => a.price - b.price);
   else if (sort === 'high') list.sort((a, b) => b.price - a.price);
@@ -151,9 +163,22 @@ function renderHomeGrid() {
   grid.innerHTML = list.length ? list.map(productCard).join('') : emptyState('Belum ada produk yang cocok', 'Coba ubah kata kunci, kategori, atau filter kondisi.');
 }
 
+/* ---------------- Filter helpers ---------------- */
+const PAGE_SIZE = 12;
+function productInPriceRange(p, min, max) {
+  const v = Number(p.price) || 0;
+  if (min !== '' && min !== null && min !== undefined && v < Number(min)) return false;
+  if (max !== '' && max !== null && max !== undefined && v > Number(max)) return false;
+  return true;
+}
+function locationOptions(selected) {
+  const locs = [...new Set(DB.products().map(p => p.location).filter(Boolean))].sort();
+  return `<option value="">Semua lokasi</option>` + locs.map(l => `<option value="${safe(l)}" ${selected === l ? 'selected' : ''}>${safe(l)}</option>`).join('');
+}
+
 /* ---------------- Explore ---------------- */
 let exploreCategory = '';
-const exploreState = { q: '', condition: '', sort: 'newest' };
+const exploreState = { q: '', condition: '', sort: 'newest', min: '', max: '', location: '', includeSold: false, limit: PAGE_SIZE };
 
 function renderExplore() {
   const root = document.getElementById('app');
@@ -165,18 +190,26 @@ function renderExplore() {
     </div>
     <div class="chips" id="exploreChips"></div>
     <div class="toolbar">
-      <div class="search"><span>⌕</span><input id="exploreSearch" type="search" value="${safe(exploreState.q)}" placeholder="Cari nama produk, kategori, atau penjual..." oninput="exploreState.q=this.value;renderExploreGrid()"></div>
-      <select id="exploreCondition" onchange="exploreState.condition=this.value;renderExploreGrid()">
+      <div class="search"><span>⌕</span><input id="exploreSearch" type="search" value="${safe(exploreState.q)}" placeholder="Cari nama produk, kategori, atau penjual..." oninput="exploreState.q=this.value;exploreState.limit=PAGE_SIZE;renderExploreGrid()"></div>
+      <select id="exploreCondition" onchange="exploreState.condition=this.value;exploreState.limit=PAGE_SIZE;renderExploreGrid()">
         <option value="">Semua kondisi</option>${CONDITIONS.map(c => `<option ${exploreState.condition === c ? 'selected' : ''}>${c}</option>`).join('')}
       </select>
-      <select id="exploreSort" onchange="exploreState.sort=this.value;renderExploreGrid()">
+      <select id="exploreLocation" onchange="exploreState.location=this.value;exploreState.limit=PAGE_SIZE;renderExploreGrid()">${locationOptions(exploreState.location)}</select>
+      <select id="exploreSort" onchange="exploreState.sort=this.value;exploreState.limit=PAGE_SIZE;renderExploreGrid()">
         <option value="newest" ${exploreState.sort === 'newest' ? 'selected' : ''}>Terbaru</option>
         <option value="low" ${exploreState.sort === 'low' ? 'selected' : ''}>Harga terendah</option>
         <option value="high" ${exploreState.sort === 'high' ? 'selected' : ''}>Harga tertinggi</option>
         <option value="name" ${exploreState.sort === 'name' ? 'selected' : ''}>Nama A–Z</option>
       </select>
     </div>
+    <div class="toolbar price-range">
+      <input id="exploreMin" type="number" min="0" step="10000" value="${safe(exploreState.min)}" placeholder="Harga min (Rp)" oninput="exploreState.min=this.value;exploreState.limit=PAGE_SIZE;renderExploreGrid()">
+      <input id="exploreMax" type="number" min="0" step="10000" value="${safe(exploreState.max)}" placeholder="Harga maks (Rp)" oninput="exploreState.max=this.value;exploreState.limit=PAGE_SIZE;renderExploreGrid()">
+      <label class="check"><input type="checkbox" id="exploreSold" ${exploreState.includeSold ? 'checked' : ''} onchange="exploreState.includeSold=this.checked;exploreState.limit=PAGE_SIZE;renderExploreGrid()"> Tampilkan produk terjual</label>
+      <button class="btn btn-light btn-sm" onclick="resetExploreFilters()">Reset filter</button>
+    </div>
     <div class="products" id="exploreGrid"></div>
+    <div id="exploreMore" style="text-align:center;margin-top:20px"></div>
   </div></div>`;
   renderExploreChips();
   renderExploreGrid();
@@ -188,23 +221,43 @@ function renderExploreChips() {
     DB.categories().map(c => `<button class="chip ${exploreCategory === c.name ? 'active' : ''}" onclick="setExploreCategory('${safe(c.name).replace(/'/g, "\\'")}')">${safe(c.icon)} ${safe(c.name)}</button>`).join('');
 }
 function setExploreCategory(name) { exploreCategory = name; renderExploreChips(); renderExploreGrid(); }
+function resetExploreFilters() {
+  exploreState.q = ''; exploreState.condition = ''; exploreState.location = '';
+  exploreState.min = ''; exploreState.max = ''; exploreState.includeSold = false;
+  exploreState.sort = 'newest'; exploreState.limit = PAGE_SIZE;
+  exploreCategory = '';
+  renderExplore();
+  renderExploreChips();
+}
 function renderExploreGrid() {
   const grid = document.getElementById('exploreGrid');
   if (!grid) return;
   const q = (document.getElementById('exploreSearch').value || '').toLowerCase().trim();
   const cond = document.getElementById('exploreCondition').value;
   const sort = document.getElementById('exploreSort').value;
-  let list = approvedProducts().filter(p => {
+  const source = exploreState.includeSold ? DB.products().filter(p => p.status === 'approved') : approvedProducts();
+  let list = source.filter(p => {
     const seller = sellerOf(p);
     const hay = (p.name + ' ' + p.category + ' ' + (seller ? seller.name : '') + ' ' + p.location).toLowerCase();
-    return (!exploreCategory || p.category === exploreCategory) && (!cond || p.condition === cond) && (!q || hay.includes(q));
+    return (!exploreCategory || p.category === exploreCategory)
+      && (!cond || p.condition === cond)
+      && (!q || hay.includes(q))
+      && (!exploreState.location || p.location === exploreState.location)
+      && productInPriceRange(p, exploreState.min, exploreState.max);
   });
   if (sort === 'low') list.sort((a, b) => a.price - b.price);
   else if (sort === 'high') list.sort((a, b) => b.price - a.price);
   else if (sort === 'name') list.sort((a, b) => a.name.localeCompare(b.name));
   else list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const shown = list.slice(0, exploreState.limit);
   document.getElementById('exploreCount').textContent = list.length + ' produk ditemukan';
-  grid.innerHTML = list.length ? list.map(productCard).join('') : emptyState('Tidak ada produk ditemukan', 'Coba kata kunci atau filter kategori lain.');
+  grid.innerHTML = list.length ? shown.map(productCard).join('') : emptyState('Tidak ada produk ditemukan', 'Coba kata kunci, rentang harga, atau filter lain.');
+  const more = document.getElementById('exploreMore');
+  if (more) {
+    more.innerHTML = list.length > shown.length
+      ? `<button class="btn btn-outline" onclick="exploreState.limit+=PAGE_SIZE;renderExploreGrid()">Muat ${Math.min(PAGE_SIZE, list.length - shown.length)} produk lagi (${list.length - shown.length} tersisa)</button>`
+      : (list.length ? `<span class="small">Menampilkan semua ${list.length} produk.</span>` : '');
+  }
 }
 
 /* ---------------- Shared product card ---------------- */
@@ -226,7 +279,7 @@ function productCard(p) {
       <div class="product-cat">${safe(p.category)}</div>
       <h3>${safe(p.name)}</h3>
       <div class="price">${rupiah(p.price)}</div>
-      <div class="seller"><span>♙ ${safe(seller ? seller.name : 'Seller ReUse')}</span><span>⌖ ${safe(p.location)}</span></div>
+      <div class="seller"><span>♙ ${safe(seller ? seller.name : 'Seller ReUse')}${seller && seller.verified ? ' <span class="vcheck" title="Penjual terverifikasi">✓</span>' : ''}</span><span>⌖ ${safe(p.location)}</span></div>
       <div class="product-actions">
         <button class="btn btn-light" onclick="showDetail('${p.id}')">Detail</button>
         <button class="btn btn-primary" ${unavailable ? 'disabled' : ''} onclick="addCart('${p.id}')">＋ Keranjang</button>
@@ -243,6 +296,7 @@ function showDetail(id) {
   const isOwner = user && user.id === p.sellerId;
   const seller = sellerOf(p);
   const wished = user ? DB.wishlist().some(w => w.userId === user.id && w.productId === p.id) : false;
+  const unavailable = p.status !== 'approved' || p.sold;
   if (p.status !== 'approved' || p.sold) {
     if (!isOwner && !(user && user.role === 'admin')) {
       openModal(`<h2>Produk tidak tersedia</h2><p class="modal-sub">Produk ini belum disetujui admin atau sudah tidak dijual lagi.</p>
@@ -265,12 +319,20 @@ function showDetail(id) {
           <div><b>Kondisi:</b> ${safe(p.condition)}</div>
           <div><b>Diunggah:</b> ${fmtDate(p.createdAt)}</div>
         </div>
+        ${seller ? sellerTrustHtml(seller.id) : ''}
         ${p.sold ? '<div class="hint warn" style="margin-top:12px">Produk ini sudah ditandai terjual.</div>' : ''}
-        <button class="btn btn-primary btn-block" style="margin-top:14px" ${(p.status !== 'approved' || p.sold) ? 'disabled' : ''} onclick="addCart('${p.id}');closeModal()">＋ Tambah ke Keranjang</button>
+        ${isOwner ? `<div class="hint" style="margin-top:12px">Ini produk kamu. Kelola status dan pesanan masuk dari Seller Dashboard.</div>
+          <a class="btn btn-primary btn-block" style="margin-top:10px" href="#/seller" onclick="closeModal()">Kelola Produk</a>`
+        : (user && user.role === 'admin' ? `<a class="btn btn-light btn-block" style="margin-top:12px" href="#/admin/products" onclick="closeModal()">Kelola di Admin</a>` : `
+        <button class="btn btn-primary btn-block" style="margin-top:12px" ${unavailable ? 'disabled' : ''} onclick="closeModal();createOrder('${p.id}',1,'')">Ajukan Pesanan</button>
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-          <button class="btn btn-outline" style="flex:1;min-width:120px" onclick="toggleWish('${p.id}');showDetail('${p.id}')">${wished ? '♥ Wishlist' : '♡ Simpan ke Wishlist'}</button>
-          <button class="btn btn-outline" style="flex:1;min-width:120px" onclick="openReport('${p.id}')">⚑ Laporkan</button>
+          <button class="btn btn-outline" style="flex:1;min-width:120px" ${unavailable ? 'disabled' : ''} onclick="addCart('${p.id}');closeModal()">＋ Keranjang</button>
+          <button class="btn btn-outline" style="flex:1;min-width:120px" onclick="toggleWish('${p.id}');showDetail('${p.id}')">${wished ? '♥ Wishlist' : '♡ Wishlist'}</button>
         </div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <button class="btn btn-light" style="flex:1;min-width:120px" onclick="openChatProduct('${p.id}')">✉ Chat Penjual</button>
+          <button class="btn btn-light" style="flex:1;min-width:120px" onclick="openReport('${p.id}')">⚑ Laporkan</button>
+        </div>`) }
       </div>
     </div>`);
 }
@@ -279,6 +341,10 @@ function openSellerProfile(sellerId) {
   const seller = DB.userById(sellerId);
   if (!seller) return;
   const items = DB.products().filter(p => p.sellerId === sellerId && p.status === 'approved' && !p.sold);
+  const stats = sellerStats(sellerId);
+  const reviews = reviewsFor(sellerId);
+  const me = Auth.currentUser();
+  const canChat = me && me.role !== 'admin' && me.id !== sellerId && items.length > 0;
   openModal(`
     <div style="display:flex;gap:14px;align-items:center">
       ${avatarHtml(seller, 'lg')}
@@ -287,11 +353,26 @@ function openSellerProfile(sellerId) {
         <div class="small">Bergabung ${fmtDate(seller.createdAt)}</div>
       </div>
     </div>
+    ${sellerTrustHtml(sellerId)}
     <div class="meta-list" style="margin-top:14px">
       <div><b>Lokasi:</b> ${safe(seller.location)}</div>
       <div><b>WhatsApp:</b> ${safe(seller.phone)}</div>
+      <div><b>Transaksi selesai:</b> ${stats.completed} · <b>Produk terjual:</b> ${stats.sold}</div>
       <div><b>Produk aktif:</b> ${items.length}</div>
     </div>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      ${canChat ? `<button class="btn btn-outline btn-sm" onclick="openChatProduct('${items[0] ? items[0].id : ''}')">✉ Chat Penjual</button>` : ''}
+      ${seller.phone ? `<a class="btn btn-light btn-sm" href="${waLink(seller.phone, 'Halo ' + seller.name + ', saya melihat profil kamu di ReUse.')}" target="_blank" rel="noopener">WhatsApp ↗</a>` : ''}
+    </div>
+    <h3 style="margin:18px 0 6px;color:var(--forest);font-size:15px">Ulasan Pembeli (${reviews.length})</h3>
+    ${reviews.length ? reviews.slice(0, 4).map(r => {
+      const buyer = DB.userById(r.buyerId);
+      return `<div class="review-row">
+        <div><strong>${safe(buyer ? buyer.name : 'Pembeli')}</strong> ${starsHtml(r.rating, true)}</div>
+        <div class="small">${safe(r.comment || 'Tidak ada komentar.')}</div>
+        <div class="small">${fmtDate(r.createdAt)} · ${safe(productName(r.productId))}</div>
+      </div>`;
+    }).join('') : '<div class="hint">Belum ada ulasan. Ulasan muncul setelah transaksi selesai.</div>'}
     <h3 style="margin:18px 0 10px;color:var(--forest);font-size:15px">Produk dari penjual ini</h3>
     ${items.length ? items.map(p => `
       <div class="cart-row" style="cursor:pointer" onclick="showDetail('${p.id}')">
@@ -399,8 +480,8 @@ function renderCart() {
     </div>`;
   }).join('') + `
     <div class="cart-total"><span>Total</span><span>${rupiah(total)}</span></div>
-    <div class="hint">Produk dari penjual berbeda akan dibuat menjadi pesan WhatsApp terpisah. Pembayaran dan konfirmasi dilakukan langsung dengan penjual.</div>
-    <button class="btn btn-primary btn-block" onclick="checkout()" ${available.length ? '' : 'disabled'}>Checkout via WhatsApp ↗</button>`;
+    <div class="hint">Satu pesanan dibuat untuk setiap produk. Penjual akan mengonfirmasi, lalu kamu dapat menyelesaikan transaksi dan memberi ulasan. Kontak WhatsApp penjual tersedia di halaman pesanan.</div>
+    <button class="btn btn-primary btn-block" onclick="checkout()" ${available.length ? '' : 'disabled'}>Ajukan Pesanan</button>`;
 }
 function changeQty(id, delta) {
   const user = Auth.currentUser();
@@ -425,42 +506,20 @@ function checkout() {
   const valid = [];
   cart.forEach(c => {
     const p = DB.productById(c.productId);
-    if (p && p.status === 'approved' && !p.sold) valid.push({ item: c, product: p });
+    if (p && p.status === 'approved' && !p.sold && p.sellerId !== user.id) valid.push({ item: c, product: p });
   });
   if (!valid.length) { toast('Tidak ada produk tersedia di keranjang.', 'error'); return; }
-  const groups = {};
+  let created = 0;
   valid.forEach(v => {
-    const key = v.product.sellerId;
-    (groups[key] = groups[key] || []).push(v);
-  });
-  const sellers = Object.keys(groups);
-  const missing = sellers.filter(id => {
-    const s = DB.userById(id);
-    return !(s && s.phone) && !groups[id][0].product.phone;
-  });
-  if (missing.length) {
-    toast('Nomor WhatsApp penjual belum tersedia untuk: ' + missing.map(id => (DB.userById(id) || {}).name || id).join(', '), 'error');
-    return;
-  }
-  sellers.forEach(id => {
-    const entries = groups[id];
-    const seller = DB.userById(id);
-    const phone = (seller && seller.phone) || entries[0].product.phone;
-    const lines = [
-      'Halo ' + (seller ? seller.name : 'Penjual') + ', saya ' + user.name + ' menemukan produk kamu di ReUse.',
-      '',
-      ...entries.map(x => `Produk: ${x.product.name}\nHarga: ${rupiah(x.product.price)}\nJumlah: ${x.item.quantity}\nSubtotal: ${rupiah(x.product.price * x.item.quantity)}`),
-      '',
-      'Total: ' + rupiah(entries.reduce((s, x) => s + x.product.price * x.item.quantity, 0)),
-      '',
-      'Apakah produk masih tersedia? Terima kasih.'
-    ];
-    window.open(waLink(phone, lines.join('\n')), '_blank');
+    if (createOrder(v.product.id, v.item.quantity, '')) created += 1;
   });
   DB.saveCart(DB.cart().filter(c => c.userId !== user.id));
   syncCounts();
   closeModal();
-  toast('Checkout dibuka di WhatsApp. Lanjutkan konfirmasi dengan penjual.', 'success');
+  if (created) {
+    toast(created + ' pesanan diajukan. Menunggu konfirmasi penjual.', 'success');
+    navigate('/orders');
+  }
 }
 
 /* ---------------- Report product ---------------- */
@@ -518,10 +577,10 @@ function renderPrivacy() {
     </div>
     <div class="card" style="padding:26px;line-height:1.7">
       <h2 style="font-size:19px">1. Data yang dikumpulkan</h2>
-      <p class="small">Nama lengkap, username, email, nomor WhatsApp, lokasi, foto profil (opsional), data produk yang diunggah, wishlist dan keranjang, laporan produk, serta catatan aktivitas administrator.</p>
+      <p class="small">Nama lengkap, username, email, nomor WhatsApp, lokasi, foto profil (opsional), data produk yang diunggah, wishlist dan keranjang, pesanan dan riwayat transaksi, pesan/tawaran pada chat, ulasan yang kamu tulis, laporan produk, notifikasi, serta catatan aktivitas administrator.</p>
 
       <h2 style="font-size:19px;margin-top:18px">2. Tujuan penggunaan</h2>
-      <p class="small">Menampilkan identitas penjual pada katalog, menghubungkan pembeli dengan penjual melalui WhatsApp, memoderasi produk dan laporan, serta menampilkan statistik marketplace pada dashboard admin.</p>
+      <p class="small">Menampilkan identitas penjual pada katalog, memproses pesanan dan negosiasi harga antara pembeli dan penjual, menampilkan ulasan untuk membangun kepercayaan, menghubungkan pembeli dengan penjual melalui WhatsApp, memoderasi produk dan laporan, serta menampilkan statistik marketplace pada dashboard admin.</p>
 
       <h2 style="font-size:19px;margin-top:18px">3. Penyimpanan &amp; retensi</h2>
       <p class="small">Prototipe ini menyimpan seluruh data di <b>localStorage browser kamu sendiri</b> — tidak ada data yang dikirim ke server. Log aktivitas dan log keamanan disimpan maksimal ${SEC.POLICY.logDays} hari, lalu dibersihkan otomatis saat aplikasi dibuka. Menghapus data situs pada browser akan menghapus seluruh akun dan produk di perangkat tersebut.</p>
