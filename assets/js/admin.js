@@ -756,6 +756,7 @@ function recentLogsHtml(limit) {
 
 function adminLogsHtml() {
   const logs = DB.logs();
+  const secLogs = SEC.logs();
   return `
     <div class="admin-section-title"><div><h2>Admin Activity Log</h2><p>Riwayat tindakan administrator pada marketplace.</p></div>
       <span class="small">${logs.length} aktivitas</span></div>
@@ -765,5 +766,91 @@ function adminLogsHtml() {
         <b>${safe(admin ? admin.name : 'Administrator')}</b> — ${safe(l.description)}
         <time>${fmtDateTime(l.timestamp)} · aksi: ${safe(l.action)}</time>
       </div></div>`;
-    }).join('')}</div>` : '<div class="table-wrap"><div class="empty" style="padding:44px">Belum ada aktivitas administrator yang tercatat.<br><span class="small">Setujui, tolak, atau kelola data untuk mulai mencatat log.</span></div></div>'}`;
+    }).join('')}</div>` : '<div class="table-wrap"><div class="empty" style="padding:44px">Belum ada aktivitas administrator yang tercatat.<br><span class="small">Setujui, tolak, atau kelola data untuk mulai mencatat log.</span></div></div>'}
+
+    <div class="admin-section-title" style="margin-top:26px"><div><h2>Log Keamanan</h2><p>Percobaan login, verifikasi MFA, sesi, dan perubahan password.</p></div>
+      <span class="small">${secLogs.length} peristiwa</span></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+      <button class="btn btn-outline btn-sm" onclick="clearSecurityLogs()">Bersihkan Log Keamanan</button>
+      <span class="small">Retensi otomatis ${SEC.POLICY.logDays} hari · maksimal ${SEC.POLICY.maxAttempts} percobaan login / ${Math.round(SEC.POLICY.windowMs / 60000)} menit</span>
+    </div>
+    ${secLogs.length ? `<div class="log-list">${secLogs.map(l => `
+      <div class="log-item"><span class="dot"></span><div style="flex:1">
+        <b>${safe(l.event)}</b> — ${safe(l.detail)}
+        <time>${fmtDateTime(l.at)}</time>
+      </div></div>`).join('')}</div>` : '<div class="table-wrap"><div class="empty" style="padding:34px">Belum ada peristiwa keamanan yang tercatat.</div></div>'}
+
+    <div class="admin-section-title" style="margin-top:26px"><div><h2>Backup &amp; Pemulihan</h2><p>Snapshot data marketplace dalam satu file JSON.</p></div></div>
+    <div class="table-wrap" style="padding:18px">
+      <p class="small" style="margin:0">File backup memuat akun, produk, kategori, laporan, dan log — termasuk hash password demo. Simpan file secara privat dan jangan unggah ke tempat publik. Foto profil tidak disertakan agar ukuran file tetap kecil.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+        <button class="btn btn-primary btn-sm" onclick="downloadBackup()">Unduh Backup JSON</button>
+        <label class="btn btn-outline btn-sm" style="cursor:pointer">Pulihkan dari File<input type="file" accept="application/json,.json" style="display:none" onchange="restoreBackupFromFile(event)"></label>
+      </div>
+      <div class="small" style="margin-top:10px">Saat ini: ${DB.users().length} akun · ${DB.products().length} produk · ${DB.categories().length} kategori · ${DB.reports().length} laporan · ${logs.length} log aktivitas</div>
+    </div>`;
+}
+
+/* ---------------- Backup & log keamanan ---------------- */
+function downloadBackup() {
+  try {
+    const blob = new Blob([SEC.exportData()], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'reuse-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    logAdmin('backup_data', 'Mengunduh snapshot data marketplace.');
+    SEC.log('backup_created', 'Administrator mengunduh backup data.');
+    toast('Backup diunduh. Simpan file di tempat yang aman.', 'success');
+    renderAdmin('/admin/logs');
+  } catch (err) {
+    console.error(err);
+    toast('Backup gagal dibuat. Coba lagi.', 'error');
+  }
+}
+
+function restoreBackupFromFile(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { toast('Ukuran file backup maksimal 5 MB.', 'error'); e.target.value = ''; return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    confirmDialog({
+      title: 'Pulihkan data dari backup?',
+      message: 'Seluruh data marketplace saat ini akan diganti dengan isi file backup. Tindakan ini tidak dapat dibatalkan.',
+      confirmText: 'Pulihkan',
+      cancelText: 'Batal',
+      danger: true
+    }).then(ok => {
+      e.target.value = '';
+      if (!ok) return;
+      const res = SEC.importData(reader.result);
+      if (!res.ok) { toast(res.error, 'error'); return; }
+      SEC.log('backup_restored', 'Data dipulihkan dari file backup oleh administrator.');
+      logAdmin('restore_backup', 'Memulihkan data dari backup: ' + res.counts.users + ' akun, ' + res.counts.products + ' produk.');
+      toast('Data berhasil dipulihkan dari backup.', 'success');
+      renderAdmin('/admin/logs');
+    });
+  };
+  reader.readAsText(file);
+}
+
+function clearSecurityLogs() {
+  confirmDialog({
+    title: 'Bersihkan log keamanan?',
+    message: 'Semua catatan percobaan login, MFA, dan perubahan password akan dihapus. Log aktivitas admin tetap tersimpan.',
+    confirmText: 'Bersihkan',
+    cancelText: 'Batal',
+    danger: true
+  }).then(ok => {
+    if (!ok) return;
+    SEC.clearLogs();
+    logAdmin('clear_security_logs', 'Membersihkan log keamanan.');
+    toast('Log keamanan dibersihkan.', 'info');
+    renderAdmin('/admin/logs');
+  });
 }

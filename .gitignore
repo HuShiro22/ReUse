@@ -1,0 +1,17 @@
+# Rahasia & konfigurasi lokal — jangan pernah di-commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+.vercel/
+
+# Dependensi
+node_modules/
+
+# Log & artefak lokal
+*.log
+*.zip
+.DS_Store
+Thumbs.db

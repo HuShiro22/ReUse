@@ -191,13 +191,13 @@ function openProductForm(id) {
     <p class="modal-sub">${existing ? 'Perbarui informasi produk kamu.' : 'Produk baru akan berstatus Pending sampai disetujui admin.'}</p>
     <div class="alert" id="productAlert"></div>
     <form onsubmit="saveProduct(event${existing ? ", '" + existing.id + "'" : ''})" novalidate>
-      <div class="field"><label>Nama produk</label><input name="name" value="${existing ? safe(existing.name) : ''}" placeholder="Contoh: Tas kanvas preloved"></div>
+      <div class="field"><label>Nama produk</label><input name="name" maxlength="80" value="${existing ? safe(existing.name) : ''}" placeholder="Contoh: Tas kanvas preloved"></div>
       <div class="form-row">
         <div class="field"><label>Harga (Rp)</label><input name="price" type="number" min="1" step="1000" value="${existing ? existing.price : ''}" placeholder="150000"></div>
         <div class="field"><label>Kondisi barang</label><select name="condition">${CONDITIONS.map(c => `<option ${existing && existing.condition === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
       </div>
       <div class="field"><label>Kategori</label><select name="category">${cats.map(c => `<option value="${safe(c.name)}" ${existing && existing.category === c.name ? 'selected' : ''}>${safe(c.name)}</option>`).join('')}</select></div>
-      <div class="field"><label>Deskripsi</label><textarea name="description" placeholder="Jelaskan kondisi, ukuran, dan detail barang...">${existing ? safe(existing.description) : ''}</textarea></div>
+      <div class="field"><label>Deskripsi</label><textarea name="description" maxlength="2000" placeholder="Jelaskan kondisi, ukuran, dan detail barang...">${existing ? safe(existing.description) : ''}</textarea></div>
       <div class="field">
         <label>Foto produk</label>
         <div class="upload-row">
@@ -205,11 +205,11 @@ function openProductForm(id) {
           <label class="btn btn-light btn-sm" style="cursor:pointer">Unggah Foto<input type="file" accept="image/*" style="display:none" onchange="onProductImage(event)"></label>
           <span class="small">atau tempel URL di bawah (maks. 400 KB untuk unggahan).</span>
         </div>
-        <input name="image" value="${existing ? safe(existing.image) : ''}" placeholder="https://..." style="margin-top:9px" oninput="document.getElementById('productPreview').src=this.value||'${PLACEHOLDER}'">
+        <input name="image" maxlength="600" value="${existing ? safe(existing.image) : ''}" placeholder="https://..." style="margin-top:9px" oninput="document.getElementById('productPreview').src=this.value||'${PLACEHOLDER}'">
       </div>
       <div class="form-row">
-        <div class="field"><label>Lokasi</label><input name="location" value="${existing ? safe(existing.location) : safe(user.location)}"></div>
-        <div class="field"><label>Nomor WhatsApp</label><input name="phone" value="${existing ? safe(existing.phone) : safe(user.phone)}"></div>
+        <div class="field"><label>Lokasi</label><input name="location" maxlength="80" value="${existing ? safe(existing.location) : safe(user.location)}"></div>
+        <div class="field"><label>Nomor WhatsApp</label><input name="phone" maxlength="20" value="${existing ? safe(existing.phone) : safe(user.phone)}"></div>
       </div>
       <div class="hint">${existing ? 'Mengedit produk yang ditolak akan mengirimkannya kembali untuk ditinjau admin.' : 'Seller ID mengikuti akun yang sedang login. Status awal: Pending.'}</div>
       <div class="modal-actions">
@@ -241,18 +241,21 @@ function saveProduct(e, id) {
   if (!user || user.role !== 'seller') return;
   const f = e.target;
   clearAlert('productAlert');
-  const name = f.name.value.trim();
+  const name = SEC.cleanText(f.name.value, 80);
   const price = Number(f.price.value);
-  const category = f.category.value;
-  const condition = f.condition.value;
-  const description = f.description.value.trim();
-  const image = pendingProductImage || f.image.value.trim() || PLACEHOLDER;
-  const location = f.location.value.trim();
-  const phone = f.phone.value.trim();
+  const category = SEC.cleanText(f.category.value, 60);
+  const condition = SEC.cleanText(f.condition.value, 30);
+  const description = SEC.cleanMultiline(f.description.value, 2000);
+  const rawImage = f.image.value.trim();
+  const safeImage = rawImage ? SEC.cleanUrl(rawImage) : '';
+  const image = pendingProductImage || safeImage || PLACEHOLDER;
+  const location = SEC.cleanText(f.location.value, 80);
+  const phone = SEC.cleanText(f.phone.value, 20);
 
   if (name.length < 3) return setAlert('productAlert', 'error', 'Nama produk minimal 3 karakter.');
-  if (!price || price < 1) return setAlert('productAlert', 'error', 'Harga harus lebih dari 0.');
-  if (!category) return setAlert('productAlert', 'error', 'Kategori wajib dipilih.');
+  if (!Number.isFinite(price) || price < 1 || price > 1000000000) return setAlert('productAlert', 'error', 'Harga harus antara Rp1 dan Rp1.000.000.000.');
+  if (!DB.categories().some(c => c.name === category)) return setAlert('productAlert', 'error', 'Kategori tidak valid. Pilih dari daftar kategori.');
+  if (rawImage && !safeImage) return setAlert('productAlert', 'error', 'URL foto harus diawali http:// atau https://.');
   if (!CONDITIONS.includes(condition)) return setAlert('productAlert', 'error', 'Kondisi barang tidak valid.');
   if (description.length < 20) return setAlert('productAlert', 'error', 'Deskripsi minimal 20 karakter agar pembeli yakin.');
   if (location.length < 3) return setAlert('productAlert', 'error', 'Lokasi minimal 3 karakter.');

@@ -13,7 +13,9 @@ const KEYS = {
   logs: 'reuse_v2_logs',
   categories: 'reuse_v2_categories',
   session: 'reuse_v2_session',
-  meta: 'reuse_v2_meta'
+  meta: 'reuse_v2_meta',
+  attempts: 'reuse_v2_login_attempts',
+  securityLogs: 'reuse_v2_security_logs'
 };
 
 const PLACEHOLDER = 'https://placehold.co/600x450/e9efe8/244c3a?text=ReUse';
@@ -98,6 +100,8 @@ const DB = {
     this._set(KEYS.logs, this._get(KEYS.logs, []));
     this._set(KEYS.categories, this._get(KEYS.categories, SEED_CATEGORIES));
     this._set(KEYS.meta, Object.assign({ version: 2, introDone: false }, this._get(KEYS.meta, {})));
+    this._set(KEYS.attempts, this._get(KEYS.attempts, {}));
+    this._set(KEYS.securityLogs, this._get(KEYS.securityLogs, []));
   },
   users() { return this._get(KEYS.users, []); },
   saveUsers(v) { this._set(KEYS.users, v); },

@@ -482,7 +482,7 @@ function openReport(productId) {
           <option>Konten melanggar ketentuan</option>
         </select>
       </div>
-      <div class="field"><label>Deskripsi laporan</label><textarea name="description" placeholder="Jelaskan detail masalah yang kamu temukan..." required></textarea></div>
+      <div class="field"><label>Deskripsi laporan</label><textarea name="description" maxlength="1000" placeholder="Jelaskan detail masalah yang kamu temukan..." required></textarea></div>
       <button class="btn btn-primary btn-block" type="submit">Kirim Laporan</button>
     </form>
     <div class="hint">Laporan palsu atau tidak valid dapat ditolak administrator.</div>
@@ -492,7 +492,7 @@ function submitReport(e, productId) {
   e.preventDefault();
   const user = Auth.currentUser();
   const f = e.target;
-  const description = f.description.value.trim();
+  const description = SEC.cleanMultiline(f.description.value, 1000);
   if (description.length < 10) { setAlert('reportAlert', 'error', 'Deskripsi laporan minimal 10 karakter.'); return; }
   const reports = DB.reports();
   reports.unshift({
@@ -507,6 +507,45 @@ function submitReport(e, productId) {
   DB.saveReports(reports);
   closeModal();
   toast('Laporan terkirim. Admin akan meninjau dalam waktu dekat.', 'success');
+}
+
+/* ---------------- Kebijakan privasi & keamanan ---------------- */
+function renderPrivacy() {
+  document.getElementById('app').innerHTML = `
+  <div class="page"><div class="container" style="max-width:900px">
+    <div class="page-head">
+      <div><span class="kicker">PRIVACY &amp; SECURITY</span><h1>Kebijakan Privasi &amp; Keamanan</h1><p class="sub">Transparansi data yang dikumpulkan ReUse dan kontrol keamanan yang diterapkan pada prototipe v2.0.</p></div>
+    </div>
+    <div class="card" style="padding:26px;line-height:1.7">
+      <h2 style="font-size:19px">1. Data yang dikumpulkan</h2>
+      <p class="small">Nama lengkap, username, email, nomor WhatsApp, lokasi, foto profil (opsional), data produk yang diunggah, wishlist dan keranjang, laporan produk, serta catatan aktivitas administrator.</p>
+
+      <h2 style="font-size:19px;margin-top:18px">2. Tujuan penggunaan</h2>
+      <p class="small">Menampilkan identitas penjual pada katalog, menghubungkan pembeli dengan penjual melalui WhatsApp, memoderasi produk dan laporan, serta menampilkan statistik marketplace pada dashboard admin.</p>
+
+      <h2 style="font-size:19px;margin-top:18px">3. Penyimpanan &amp; retensi</h2>
+      <p class="small">Prototipe ini menyimpan seluruh data di <b>localStorage browser kamu sendiri</b> — tidak ada data yang dikirim ke server. Log aktivitas dan log keamanan disimpan maksimal ${SEC.POLICY.logDays} hari, lalu dibersihkan otomatis saat aplikasi dibuka. Menghapus data situs pada browser akan menghapus seluruh akun dan produk di perangkat tersebut.</p>
+
+      <h2 style="font-size:19px;margin-top:18px">4. Kontrol keamanan yang diterapkan</h2>
+      <ul class="small" style="padding-left:18px">
+        <li>Batas percobaan login: ${SEC.POLICY.maxAttempts} kali per ${Math.round(SEC.POLICY.windowMs / 60000)} menit, lalu dikunci ${Math.round(SEC.POLICY.lockMs / 60000)} menit.</li>
+        <li>Verifikasi dua faktor (6 digit, berbasis waktu) untuk akun administrator.</li>
+        <li>Sesi berakhir otomatis setelah ${Math.round(SEC.POLICY.idleMs / 60000)} menit tidak aktif; dashboard tidak dapat dibuka tanpa login.</li>
+        <li>Sanitasi seluruh input teks dan escape output (anti-XSS), serta validasi URL gambar (hanya http/https atau data:image).</li>
+        <li>Password disimpan sebagai hash, bukan teks asli, dan wajib minimal 8 karakter berisi huruf dan angka.</li>
+        <li>HTTPS/TLS dengan HSTS, CSP, nosniff, dan proteksi clickjacking pada hosting produksi (Vercel).</li>
+        <li>Snapshot data (backup JSON) dan retensi log ${SEC.POLICY.logDays} hari pada dashboard admin.</li>
+      </ul>
+
+      <h2 style="font-size:19px;margin-top:18px">5. Batasan prototipe</h2>
+      <p class="small">Karena berjalan sepenuhnya di browser, kontrol di atas bersifat demonstrasi. Pada produksi, autentikasi, MFA, rate limiting, otorisasi per peran, dan validasi wajib ditegakkan di server dengan database sungguhan. Jangan gunakan password yang sama dengan akun pentingmu.</p>
+
+      <h2 style="font-size:19px;margin-top:18px">6. Hak kamu</h2>
+      <p class="small">Kamu dapat melihat dan memperbarui data melalui <a href="#/profile" style="color:var(--forest);font-weight:750">Profil Saya</a>, mengganti password di tab Keamanan, atau menghapus seluruh data lokal dengan membersihkan penyimpanan situs pada browser.</p>
+
+      <p class="small" style="margin-top:18px">Terakhir diperbarui: ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })} · ReUse Marketplace v2.0</p>
+    </div>
+  </div></div>`;
 }
 
 /* ---------------- Seller entry point ---------------- */

@@ -1,32 +1,63 @@
 /* ============================================================
    ReUse v2.0 — Authentication, session & user profile
    DEMO ONLY: session + password hash live in localStorage.
+   Kontrol keamanan tambahan ada di security.js (rate limit, MFA,
+   timeout sesi). Semuanya tetap harus ditegakkan ulang di server.
    ============================================================ */
 const Auth = {
   currentUser() {
     const s = DB.session();
     if (!s || !s.userId) return null;
+    if (SEC.sessionExpired(s)) {
+      DB.saveSession(null);
+      SEC._idleExpired = true;
+      SEC.log('session_timeout', 'Sesi berakhir otomatis setelah tidak aktif 30 menit.');
+      return null;
+    }
     const u = DB.userById(s.userId);
     if (!u || u.status !== 'active') { DB.saveSession(null); return null; }
     return u;
   },
-  login(identifier, password) {
+  /* Verifikasi kredensial + rate limit, tanpa membuat sesi. */
+  verify(identifier, password) {
     const idf = String(identifier || '').trim().toLowerCase();
     if (!idf || !password) return { ok: false, error: 'Email/username dan password wajib diisi.' };
+    const lock = SEC.lockState(idf);
+    if (lock.locked) {
+      return { ok: false, locked: true, error: 'Terlalu banyak percobaan gagal. Coba lagi dalam ' + Math.ceil(lock.msLeft / 60000) + ' menit.' };
+    }
     const user = DB.users().find(u =>
       u.username.toLowerCase() === idf || u.email.toLowerCase() === idf
     );
-    if (!user) return { ok: false, error: 'Akun tidak ditemukan. Periksa email atau username kamu.' };
-    if (user.passwordHash !== hashPassword(password)) return { ok: false, error: 'Password salah. Silakan coba lagi.' };
+    if (!user || user.passwordHash !== hashPassword(password)) {
+      const state = SEC.recordFailure(idf);
+      SEC.log('login_failed', 'Percobaan login gagal untuk "' + idf.slice(0, 40) + '".');
+      if (state.locked) {
+        return { ok: false, locked: true, error: 'Terlalu banyak percobaan gagal. Login dikunci sementara selama ' + Math.round(SEC.POLICY.lockMs / 60000) + ' menit.' };
+      }
+      return { ok: false, error: 'Email/username atau password salah. Sisa percobaan: ' + state.attemptsLeft + '.' };
+    }
     if (user.status !== 'active') return { ok: false, error: 'Akun kamu sedang dinonaktifkan. Hubungi administrator ReUse.' };
-    DB.saveSession({ userId: user.id, at: new Date().toISOString() });
-    const meta = DB.meta(); meta.introDone = true; DB.saveMeta(meta);
     return { ok: true, user };
+  },
+  startSession(user) {
+    SEC.resetAttempts(user.username);
+    SEC.resetAttempts(user.email);
+    SEC.openSession(user);
+    const meta = DB.meta(); meta.introDone = true; DB.saveMeta(meta);
+    SEC.log('login_success', 'Login berhasil: @' + user.username + ' (' + user.role + ').');
+    return user;
+  },
+  login(identifier, password) {
+    const res = this.verify(identifier, password);
+    if (!res.ok) return res;
+    this.startSession(res.user);
+    return { ok: true, user: res.user };
   },
   register(payload) {
     const users = DB.users();
-    const username = payload.username.trim();
-    const email = payload.email.trim().toLowerCase();
+    const username = SEC.cleanText(payload.username, 20);
+    const email = SEC.cleanText(payload.email, 120).toLowerCase();
     if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
       return { ok: false, field: 'username', error: 'Username sudah digunakan. Coba yang lain.' };
     }
@@ -35,11 +66,11 @@ const Auth = {
     }
     const user = {
       id: uid('u'),
-      name: payload.name.trim(),
+      name: SEC.cleanText(payload.name, 80),
       username,
       email,
-      phone: payload.phone.trim(),
-      location: payload.location.trim(),
+      phone: SEC.cleanText(payload.phone, 20),
+      location: SEC.cleanText(payload.location, 80),
       role: payload.role === 'seller' ? 'seller' : 'customer',
       status: 'active',
       passwordHash: hashPassword(payload.password),
@@ -51,6 +82,8 @@ const Auth = {
     return { ok: true, user };
   },
   logout() {
+    const user = this.currentUser();
+    if (user) SEC.log('logout', 'Logout: @' + user.username + '.');
     DB.saveSession(null);
   },
   requireRole(roles) {
@@ -91,12 +124,12 @@ function renderLogin() {
         <form id="loginForm" onsubmit="handleLogin(event)" novalidate>
           <div class="field" id="f-loginId">
             <label for="loginId">Email atau Username</label>
-            <input id="loginId" name="identifier" autocomplete="username" placeholder="nama@email.com atau username">
+            <input id="loginId" name="identifier" autocomplete="username" maxlength="120" placeholder="nama@email.com atau username">
           </div>
           <div class="field" id="f-loginPw">
             <label for="loginPw">Password</label>
             <div class="password-wrap">
-              <input id="loginPw" name="password" type="password" autocomplete="current-password" placeholder="Password kamu">
+              <input id="loginPw" name="password" type="password" autocomplete="current-password" maxlength="72" placeholder="Password kamu">
               <button type="button" class="password-toggle" onclick="togglePassword('loginPw', this)">Lihat</button>
             </div>
           </div>
@@ -175,25 +208,25 @@ function renderRegister() {
         <p class="lead">Lengkapi data di bawah. Semua kolom wajib diisi.</p>
         <div class="alert" id="regAlert"></div>
         <form id="registerForm" onsubmit="handleRegister(event)" novalidate>
-          <div class="field"><label for="regName">Nama lengkap</label><input id="regName" name="name" placeholder="Contoh: Nadia Putri"></div>
+          <div class="field"><label for="regName">Nama lengkap</label><input id="regName" name="name" maxlength="80" placeholder="Contoh: Nadia Putri"></div>
           <div class="form-row">
-            <div class="field"><label for="regUsername">Username</label><input id="regUsername" name="username" placeholder="nadiasaleh" autocomplete="username"></div>
-            <div class="field"><label for="regEmail">Email</label><input id="regEmail" name="email" type="email" placeholder="nama@email.com" autocomplete="email"></div>
+            <div class="field"><label for="regUsername">Username</label><input id="regUsername" name="username" maxlength="20" placeholder="nadiasaleh" autocomplete="username"></div>
+            <div class="field"><label for="regEmail">Email</label><input id="regEmail" name="email" type="email" maxlength="120" placeholder="nama@email.com" autocomplete="email"></div>
           </div>
           <div class="form-row">
-            <div class="field"><label for="regPhone">Nomor WhatsApp</label><input id="regPhone" name="phone" placeholder="08xxxxxxxxxx" inputmode="tel"></div>
-            <div class="field"><label for="regLocation">Lokasi</label><input id="regLocation" name="location" placeholder="Banda Aceh"></div>
+            <div class="field"><label for="regPhone">Nomor WhatsApp</label><input id="regPhone" name="phone" maxlength="20" placeholder="08xxxxxxxxxx" inputmode="tel"></div>
+            <div class="field"><label for="regLocation">Lokasi</label><input id="regLocation" name="location" maxlength="80" placeholder="Banda Aceh"></div>
           </div>
           <div class="form-row">
             <div class="field"><label for="regPassword">Password</label>
               <div class="password-wrap">
-                <input id="regPassword" name="password" type="password" placeholder="Minimal 8 karakter" autocomplete="new-password">
+                <input id="regPassword" name="password" type="password" maxlength="72" placeholder="Min. 8 karakter, huruf &amp; angka" autocomplete="new-password">
                 <button type="button" class="password-toggle" onclick="togglePassword('regPassword', this)">Lihat</button>
               </div>
             </div>
             <div class="field"><label for="regConfirm">Konfirmasi password</label>
               <div class="password-wrap">
-                <input id="regConfirm" name="confirm" type="password" placeholder="Ulangi password" autocomplete="new-password">
+                <input id="regConfirm" name="confirm" type="password" maxlength="72" placeholder="Ulangi password" autocomplete="new-password">
                 <button type="button" class="password-toggle" onclick="togglePassword('regConfirm', this)">Lihat</button>
               </div>
             </div>
@@ -228,11 +261,11 @@ function handleRegister(e) {
   clearAlert('regAlert');
   f.querySelectorAll('.field').forEach(x => x.classList.remove('invalid'));
   const data = {
-    name: f.name.value.trim(),
-    username: f.username.value.trim(),
-    email: f.email.value.trim(),
-    phone: f.phone.value.trim(),
-    location: f.location.value.trim(),
+    name: SEC.cleanText(f.name.value, 80),
+    username: SEC.cleanText(f.username.value, 20),
+    email: SEC.cleanText(f.email.value, 120),
+    phone: SEC.cleanText(f.phone.value, 20),
+    location: SEC.cleanText(f.location.value, 80),
     password: f.password.value,
     confirm: f.confirm.value,
     role: (f.querySelector('input[name="role"]:checked') || {}).value || 'customer'
@@ -242,7 +275,8 @@ function handleRegister(e) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(data.email)) return markInvalid(f, 'email', 'Format email tidak valid.');
   if (!/^\+?\d{9,15}$/.test(data.phone.replace(/[\s-]/g, ''))) return markInvalid(f, 'phone', 'Nomor WhatsApp harus 9–15 digit angka.');
   if (data.location.length < 3) return markInvalid(f, 'location', 'Lokasi minimal 3 karakter.');
-  if (data.password.length < 8) return markInvalid(f, 'password', 'Password minimal 8 karakter.');
+  const pwIssues = SEC.passwordIssues(data.password);
+  if (pwIssues.length) return markInvalid(f, 'password', 'Password harus ' + pwIssues.join(', ') + '.');
   if (data.password !== data.confirm) return markInvalid(f, 'confirm', 'Konfirmasi password tidak sama.');
 
   withLoader(() => {
@@ -258,39 +292,97 @@ function handleRegister(e) {
   });
 }
 
-/* ---------------- Admin login (separate) ---------------- */
+/* ---------------- Admin login (separate: password + MFA) ---------------- */
+let adminMfaUser = null;
+let adminMfaTimer = null;
+
+function stopMfaTimer() {
+  if (adminMfaTimer) { clearInterval(adminMfaTimer); adminMfaTimer = null; }
+}
+
 function renderAdminLogin() {
   document.getElementById('siteHeader').innerHTML = '';
   document.getElementById('siteFooter').innerHTML = '';
-  document.getElementById('app').innerHTML = `
+  stopMfaTimer();
+  const root = document.getElementById('app');
+  if (adminMfaUser) {
+    root.innerHTML = adminMfaHtml(adminMfaUser);
+    startMfaTimer();
+    return;
+  }
+  root.innerHTML = `
   <div class="auth" style="grid-template-columns:1fr;background:linear-gradient(160deg,#1b382b,#244c3a)">
     <section style="display:grid;place-items:center;padding:40px 20px;min-height:100vh">
       <div class="auth-card" style="background:#fff;padding:30px;border-radius:22px;box-shadow:var(--shadow-lg)">
         <a class="brand" href="#/" style="font-size:24px;margin-bottom:22px"><span class="brand-mark">↻</span> ReUse <span class="admin-tag" style="background:var(--soft);color:var(--forest)">ADMIN</span></a>
         <h1 style="font-size:26px">Admin Login</h1>
-        <p class="lead">Halaman khusus administrator. Akun seller dan customer tidak dapat masuk di sini.</p>
+        <p class="lead">Halaman khusus administrator dengan verifikasi dua faktor. Akun seller dan customer tidak dapat masuk di sini.</p>
         <div class="alert" id="adminAlert"></div>
         <form onsubmit="handleAdminLogin(event)" novalidate>
-          <div class="field"><label for="adminUser">Username administrator</label><input id="adminUser" name="username" autocomplete="username" placeholder="admin"></div>
+          <div class="field"><label for="adminUser">Username administrator</label><input id="adminUser" name="username" autocomplete="username" maxlength="50" placeholder="Username"></div>
           <div class="field"><label for="adminPw">Password</label>
             <div class="password-wrap">
-              <input id="adminPw" name="password" type="password" placeholder="Password admin" autocomplete="current-password">
+              <input id="adminPw" name="password" type="password" placeholder="Password admin" autocomplete="current-password" maxlength="72">
               <button type="button" class="password-toggle" onclick="togglePassword('adminPw', this)">Lihat</button>
             </div>
           </div>
-          <button class="btn btn-primary btn-block" type="submit">Masuk ke Admin Dashboard</button>
+          <button class="btn btn-primary btn-block" type="submit">Lanjut ke Verifikasi 2 Faktor</button>
         </form>
-        <div class="demo-box"><strong>Kredensial demo</strong><div class="demo-account"><span>Administrator</span><code>admin / admin123</code><button type="button" onclick="fillAdminLogin()">Isi</button></div></div>
         <p class="swap"><a href="#/login">← Login pengguna biasa</a> · <a href="#/">Beranda</a></p>
-        <div class="hint" style="margin-top:14px">Demo frontend: kredensial ini tersimpan di browser. Untuk produksi, autentikasi admin wajib divalidasi backend dengan password ter-hash.</div>
+        <div class="hint" style="margin-top:14px">Maksimal ${SEC.POLICY.maxAttempts} percobaan per ${Math.round(SEC.POLICY.windowMs / 60000)} menit. Setelah itu login dikunci sementara ${Math.round(SEC.POLICY.lockMs / 60000)} menit.</div>
       </div>
     </section>
   </div>`;
 }
 
-function fillAdminLogin() {
-  document.getElementById('adminUser').value = 'admin';
-  document.getElementById('adminPw').value = 'admin123';
+function adminMfaHtml(user) {
+  return `
+  <div class="auth" style="grid-template-columns:1fr;background:linear-gradient(160deg,#1b382b,#244c3a)">
+    <section style="display:grid;place-items:center;padding:40px 20px;min-height:100vh">
+      <div class="auth-card" style="background:#fff;padding:30px;border-radius:22px;box-shadow:var(--shadow-lg)">
+        <a class="brand" href="#/" style="font-size:24px;margin-bottom:22px"><span class="brand-mark">↻</span> ReUse <span class="admin-tag" style="background:var(--soft);color:var(--forest)">ADMIN</span></a>
+        <h1 style="font-size:26px">Verifikasi 2 Faktor</h1>
+        <p class="lead">Masukkan 6 digit kode untuk akun <b>@${safe(user.username)}</b>. Password sudah terverifikasi.</p>
+        <div class="alert" id="adminAlert"></div>
+        <form onsubmit="handleAdminMfa(event)" novalidate>
+          <div class="field"><label for="adminOtp">Kode verifikasi (6 digit)</label>
+            <input id="adminOtp" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" style="letter-spacing:6px;font-weight:800;text-align:center">
+          </div>
+          <button class="btn btn-primary btn-block" type="submit">Verifikasi &amp; Masuk</button>
+        </form>
+        <div class="demo-box">
+          <strong>Kode demo (lingkungan demonstrasi)</strong>
+          <div class="demo-account"><span>Berlaku <b id="otpCountdown">30</b> detik</span><code id="otpDemoCode">------</code><button type="button" onclick="fillAdminOtp()">Isi</button></div>
+          <div class="hint" style="margin-top:10px">Di produksi kode ini dibuat server dan dikirim ke aplikasi authenticator, tidak pernah ditampilkan di layar.</div>
+        </div>
+        <p class="swap"><button type="button" style="border:0;background:none;color:var(--forest);font-weight:750;padding:4px" onclick="cancelAdminMfa()">← Kembali ke login admin</button></p>
+      </div>
+    </section>
+  </div>`;
+}
+
+function startMfaTimer() {
+  const tick = () => {
+    const codeEl = document.getElementById('otpDemoCode');
+    const countEl = document.getElementById('otpCountdown');
+    if (!codeEl) { stopMfaTimer(); return; }
+    if (adminMfaUser) codeEl.textContent = SEC.mfaCode(SEC.mfaSecret(adminMfaUser));
+    if (countEl) countEl.textContent = SEC.mfaSecondsLeft();
+  };
+  tick();
+  adminMfaTimer = setInterval(tick, 1000);
+}
+
+function fillAdminOtp() {
+  const input = document.getElementById('adminOtp');
+  if (input && adminMfaUser) input.value = SEC.mfaCode(SEC.mfaSecret(adminMfaUser));
+  if (input) input.focus();
+}
+
+function cancelAdminMfa() {
+  adminMfaUser = null;
+  stopMfaTimer();
+  renderAdminLogin();
 }
 
 function handleAdminLogin(e) {
@@ -298,13 +390,51 @@ function handleAdminLogin(e) {
   const f = e.target;
   clearAlert('adminAlert');
   withLoader(() => {
-    const res = Auth.login(f.username.value, f.password.value);
+    const res = Auth.verify(f.username.value, f.password.value);
     if (!res.ok) { setAlert('adminAlert', 'error', res.error); return; }
     if (res.user.role !== 'admin') {
-      DB.saveSession(null);
+      SEC.log('admin_login_rejected', 'Percobaan login admin memakai akun non-admin: @' + res.user.username + '.');
       setAlert('adminAlert', 'error', 'Akun ini bukan administrator. Gunakan halaman login pengguna.');
       return;
     }
+    adminMfaUser = res.user;
+    SEC.log('mfa_challenge', 'Kode MFA diminta untuk @' + res.user.username + '.');
+    renderAdminLogin();
+  });
+}
+
+function handleAdminMfa(e) {
+  e.preventDefault();
+  const f = e.target;
+  clearAlert('adminAlert');
+  const code = String(f.code.value || '').replace(/\D/g, '');
+  if (code.length !== 6) { setAlert('adminAlert', 'error', 'Kode verifikasi harus 6 digit angka.'); return; }
+  const user = adminMfaUser;
+  if (!user) { toast('Sesi verifikasi berakhir. Ulangi login administrator.', 'info'); renderAdminLogin(); return; }
+  withLoader(() => {
+    const lockKey = 'mfa:' + user.username;
+    const lock = SEC.lockState(lockKey);
+    if (lock.locked) {
+      setAlert('adminAlert', 'error', 'Terlalu banyak kode salah. Coba lagi dalam ' + Math.ceil(lock.msLeft / 60000) + ' menit.');
+      return;
+    }
+    if (!SEC.verifyMfa(user, code)) {
+      const state = SEC.recordFailure(lockKey);
+      SEC.log('mfa_failed', 'Kode MFA salah untuk @' + user.username + '.');
+      if (state.locked) {
+        adminMfaUser = null;
+        renderAdminLogin();
+        setAlert('adminAlert', 'error', 'Terlalu banyak kode salah. Login administrator dikunci sementara ' + Math.round(SEC.POLICY.lockMs / 60000) + ' menit.');
+        return;
+      }
+      setAlert('adminAlert', 'error', 'Kode verifikasi salah atau kedaluwarsa. Sisa percobaan: ' + state.attemptsLeft + '.');
+      return;
+    }
+    SEC.resetAttempts(lockKey);
+    SEC.log('mfa_success', 'Verifikasi MFA berhasil untuk @' + user.username + '.');
+    Auth.startSession(user);
+    adminMfaUser = null;
+    stopMfaTimer();
     toast('Login administrator berhasil.', 'success');
     navigate('/admin');
   });
@@ -314,30 +444,52 @@ function handleAdminLogin(e) {
 function openForgotPassword() {
   openModal(`
     <h2>Lupa Password</h2>
-    <p class="modal-sub">Masukkan email akun kamu. Pada prototype ini password akan langsung direset tanpa verifikasi email.</p>
+    <p class="modal-sub">Verifikasi kepemilikan akun dengan email dan nomor WhatsApp yang terdaftar, lalu buat password baru.</p>
     <div class="alert" id="forgotAlert"></div>
     <form onsubmit="handleForgotPassword(event)">
-      <div class="field"><label>Email terdaftar</label><input name="email" type="email" placeholder="nama@email.com" required></div>
-      <div class="field"><label>Password baru</label><input name="password" type="password" placeholder="Minimal 8 karakter" required></div>
-      <div class="field"><label>Konfirmasi password baru</label><input name="confirm" type="password" placeholder="Ulangi password" required></div>
+      <div class="field"><label>Email terdaftar</label><input name="email" type="email" maxlength="120" placeholder="nama@email.com" required></div>
+      <div class="field"><label>Nomor WhatsApp terdaftar</label><input name="phone" maxlength="20" inputmode="tel" placeholder="08xxxxxxxxxx" required></div>
+      <div class="field"><label>Password baru</label><input name="password" type="password" maxlength="72" placeholder="Min. 8 karakter, huruf & angka" required></div>
+      <div class="field"><label>Konfirmasi password baru</label><input name="confirm" type="password" maxlength="72" placeholder="Ulangi password" required></div>
       <button class="btn btn-primary btn-block" type="submit">Simpan Password Baru</button>
     </form>
-    <div class="hint warn">Demo saja: pada produksi gunakan tautan reset berbatas waktu yang dikirim ke email pengguna.</div>
+    <div class="hint warn">Akun administrator tidak dapat direset dari halaman publik. Demo: pada produksi gunakan tautan reset berbatas waktu yang dikirim ke email pengguna.</div>
   `, 'small');
 }
 
 function handleForgotPassword(e) {
   e.preventDefault();
   const f = e.target;
-  const email = f.email.value.trim().toLowerCase();
+  const email = SEC.cleanText(f.email.value, 120).toLowerCase();
+  const phone = SEC.cleanText(f.phone.value, 20).replace(/[\s-]/g, '');
   const password = f.password.value;
   const users = DB.users();
   const user = users.find(u => u.email.toLowerCase() === email);
-  if (!user) return setAlert('forgotAlert', 'error', 'Email tidak ditemukan pada akun ReUse.');
-  if (password.length < 8) return setAlert('forgotAlert', 'error', 'Password baru minimal 8 karakter.');
+  const lockKey = 'reset:' + email;
+  const lock = SEC.lockState(lockKey);
+  if (lock.locked) {
+    return setAlert('forgotAlert', 'error', 'Terlalu banyak percobaan. Coba lagi dalam ' + Math.ceil(lock.msLeft / 60000) + ' menit.');
+  }
+  const fail = (msg) => {
+    SEC.recordFailure(lockKey);
+    SEC.log('password_reset_failed', 'Percobaan reset password gagal untuk "' + email.slice(0, 60) + '".');
+    setAlert('forgotAlert', 'error', msg);
+  };
+  if (!user) return fail('Email dan nomor WhatsApp tidak cocok dengan akun mana pun.');
+  if (user.role === 'admin') {
+    SEC.log('password_reset_blocked', 'Reset password admin dicegah dari halaman publik.');
+    return setAlert('forgotAlert', 'error', 'Akun administrator tidak dapat direset dari halaman publik. Hubungi pemilik sistem.');
+  }
+  const registeredPhone = String(user.phone || '').replace(/[\s-]/g, '');
+  if (!phone || phone !== registeredPhone) return fail('Email dan nomor WhatsApp tidak cocok dengan akun mana pun.');
+  const pwIssues = SEC.passwordIssues(password);
+  if (pwIssues.length) return setAlert('forgotAlert', 'error', 'Password harus ' + pwIssues.join(', ') + '.');
   if (password !== f.confirm.value) return setAlert('forgotAlert', 'error', 'Konfirmasi password tidak sama.');
   user.passwordHash = hashPassword(password);
   DB.saveUsers(users);
+  SEC.resetAttempts(lockKey);
+  SEC.resetAttempts(user.username);
+  SEC.log('password_reset', 'Password direset untuk @' + user.username + ' setelah verifikasi email + WhatsApp.');
   closeModal();
   toast('Password berhasil direset. Silakan login.', 'success');
 }
@@ -449,7 +601,7 @@ function showProfileTab(tab) {
         </div>
         <button class="btn btn-primary" type="submit">Ganti Password</button>
       </form>
-      <div class="hint">Sesi demo ini tersimpan di localStorage browser. Setelah logout, halaman dashboard tidak dapat dibuka kembali tanpa login.</div>`;
+      <div class="hint">Sesi berakhir otomatis setelah 30 menit tidak aktif dan tidak dapat dibuka kembali tanpa login. Password minimal 8 karakter dan wajib memuat huruf serta angka.</div>`;
   } else {
     body.innerHTML = profileInfoForm(user);
   }
@@ -524,12 +676,15 @@ function changePassword(e) {
   const user = Auth.currentUser();
   clearAlert('passwordAlert');
   if (hashPassword(f.current.value) !== user.passwordHash) return setAlert('passwordAlert', 'error', 'Password saat ini salah.');
-  if (f.next.value.length < 8) return setAlert('passwordAlert', 'error', 'Password baru minimal 8 karakter.');
+  const pwIssues = SEC.passwordIssues(f.next.value);
+  if (pwIssues.length) return setAlert('passwordAlert', 'error', 'Password baru harus ' + pwIssues.join(', ') + '.');
   if (f.next.value !== f.confirm.value) return setAlert('passwordAlert', 'error', 'Konfirmasi password tidak sama.');
+  if (f.next.value === f.current.value) return setAlert('passwordAlert', 'error', 'Password baru harus berbeda dari password saat ini.');
   const users = DB.users();
   const idx = users.findIndex(u => u.id === user.id);
   users[idx].passwordHash = hashPassword(f.next.value);
   DB.saveUsers(users);
+  SEC.log('password_changed', 'Password diperbarui untuk @' + user.username + '.');
   f.reset();
   toast('Password berhasil diperbarui.', 'success');
 }

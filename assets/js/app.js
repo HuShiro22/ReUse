@@ -106,7 +106,7 @@ function renderFooter() {
       </div>
       <div class="footer-col"><strong>JELAJAHI</strong><a href="#/">Home</a><br><a href="#/explore">Explore</a><br><a href="#/" onclick="goHomeSection('categories')">Kategori</a><br><a href="#/" onclick="goHomeSection('about')">Tentang Kami</a></div>
       <div class="footer-col"><strong>AKUN</strong><a href="#/login">Login</a><br><a href="#/register">Register</a><br><a href="#/profile">Profil</a><br><a href="#/seller">Seller Dashboard</a></div>
-      <div class="footer-col"><strong>LAINNYA</strong><a href="#/admin-login">Admin Login</a><br><a href="#/explore">Explore Produk</a><br><a href="#/" onclick="goHomeSection('about')">Tentang Kami</a></div>
+      <div class="footer-col"><strong>LAINNYA</strong><a href="#/admin-login">Admin Login</a><br><a href="#/privasi">Kebijakan Privasi</a><br><a href="#/explore">Explore Produk</a><br><a href="#/" onclick="goHomeSection('about')">Tentang Kami</a></div>
     </div>
     <div class="copyright"><span>© 2026 ReUse Marketplace. Frontend prototype untuk demonstrasi.</span><span>Data disimpan di localStorage browser · v2.0</span></div>
   </div></footer>`;
@@ -234,6 +234,8 @@ function goHomeSection(id) {
 function router() {
   const path = currentPath();
   const user = Auth.currentUser();
+  if (SEC.consumeIdleFlag()) toast('Sesi berakhir karena tidak aktif selama 30 menit. Silakan login kembali.', 'info');
+  if (user) SEC.touchSession();
   closeProfileMenu();
   closeMobileMenu();
   window.scrollTo({ top: 0, behavior: 'auto' });
@@ -282,6 +284,12 @@ function router() {
     pageTitle('Register');
     return;
   }
+  if (path === '/privasi') {
+    setChrome(true);
+    renderPrivacy();
+    pageTitle('Kebijakan Privasi');
+    return;
+  }
   if (path === '/profile') {
     if (!user) { toast('Silakan login terlebih dahulu.', 'info'); navigate('/login'); return; }
     setChrome(true);
@@ -313,6 +321,7 @@ function router() {
 /* ---------------- Boot ---------------- */
 function boot() {
   DB.init();
+  SEC.prune();
   if (!location.hash) location.hash = '#/';
   window.addEventListener('hashchange', router);
   document.addEventListener('click', () => closeProfileMenu());
