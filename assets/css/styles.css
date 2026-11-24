@@ -377,6 +377,34 @@ table.data tr:hover td{background:#fcfbf6}
 .admin-table-tools select{height:43px;border:1px solid var(--line);border-radius:11px;background:#fff;padding:0 12px;font-size:12.5px;color:#4c554d}
 .pager{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px;font-size:12px;color:var(--muted);flex-wrap:wrap}
 
+/* Product gallery */
+.detail-media{display:flex;flex-direction:column;gap:10px}
+.detail-main-wrap{position:relative;border-radius:14px;overflow:hidden;background:#f0f0e9}
+.detail-main-wrap img{width:100%;height:290px;object-fit:cover;display:block}
+.photo-counter{position:absolute;right:10px;bottom:10px;background:#252525b3;color:#fff;border-radius:20px;padding:4px 10px;font-size:11px;font-weight:700}
+.detail-thumbs{display:flex;gap:8px;flex-wrap:wrap}
+.detail-thumb{border:2px solid transparent;background:none;padding:0;border-radius:10px;overflow:hidden;width:58px;height:58px;cursor:pointer;opacity:.72}
+.detail-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.detail-thumb:hover{opacity:1}
+.detail-thumb.active{border-color:var(--forest);opacity:1}
+.photo-badge{position:absolute;top:10px;left:12px;background:#252525b3;color:#fff;border-radius:20px;padding:3px 9px;font-size:10.5px;font-weight:700;display:inline-flex;align-items:center;gap:4px}
+.photo-grid{display:flex;gap:10px;flex-wrap:wrap}
+.photo-item{position:relative;width:92px;height:92px;margin:0;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--soft)}
+.photo-item img{width:100%;height:100%;object-fit:cover;display:block}
+.photo-item.cover{border-color:var(--forest);box-shadow:0 0 0 2px #244c3a22}
+.photo-item button{position:absolute;right:4px;top:4px;border:0;background:#252525b3;color:#fff;width:20px;height:20px;border-radius:50%;font-size:12px;line-height:1;cursor:pointer}
+.photo-cover{position:absolute;left:4px;bottom:4px;background:var(--forest);color:#fff;border-radius:20px;padding:2px 7px;font-size:9.5px;font-weight:700}
+.photo-empty{font-size:11.5px;color:var(--muted);background:#f7f6ef;border:1px dashed var(--line);border-radius:10px;padding:14px;max-width:280px;line-height:1.5}
+
+/* Admin data export */
+.export-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+.export-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.export-icon{width:38px;height:38px;border-radius:11px;background:var(--soft);color:var(--forest);display:grid;place-items:center;font-size:17px;margin-bottom:2px}
+.export-card h3{font-size:15px;color:var(--forest);margin:0;letter-spacing:-.2px}
+.export-card p{font-size:12px;color:var(--muted);line-height:1.55;margin:0;min-height:36px}
+.export-meta{font-size:11px;color:var(--muted);font-weight:600;margin:2px 0 8px}
+.export-meta b{font-size:20px;color:var(--forest);margin-right:3px}
+
 /* Transactions, chat, reviews, notifications */
 .count.hide{display:none}
 .link-btn{border:0;background:none;color:var(--forest);font-weight:750;font-size:12px;padding:0;text-decoration:underline}
@@ -530,4 +558,11 @@ table.data tr:hover td{background:#fcfbf6}
   .stat b{font-size:20px}
   .products{grid-template-columns:1fr 1fr}
   .product-image{height:140px}
+}
+
+/* Gallery & export responsive */
+@media(max-width:850px){
+  .export-grid{grid-template-columns:1fr}
+  .detail-main-wrap img{height:220px}
+  .photo-item{width:78px;height:78px}
 }

@@ -7,10 +7,12 @@ const ADMIN_SECTIONS = [
   { key: 'users', label: 'Users', icon: '♙' },
   { key: 'categories', label: 'Categories', icon: '◇' },
   { key: 'reports', label: 'Reports', icon: '⚑' },
-  { key: 'logs', label: 'Activity Log', icon: '◷' }
+  { key: 'logs', label: 'Activity Log', icon: '◷' },
+  { key: 'export', label: 'Data Export', icon: '⤓' }
 ];
 let adminProductFilters = { q: '', category: '', status: '' };
 let adminUserFilters = { q: '', role: '' };
+let adminLogFilters = { q: '', action: '' };
 
 function requireAdmin() {
   const user = Auth.currentUser();
@@ -81,6 +83,7 @@ function adminContent(section) {
   if (section === 'categories') return adminCategoriesHtml();
   if (section === 'reports') return adminReportsHtml();
   if (section === 'logs') return adminLogsHtml();
+  if (section === 'export') return adminExportHtml();
   return adminOverviewHtml();
 }
 
@@ -294,7 +297,7 @@ function adminFilteredProducts() {
   if (q) {
     list = list.filter(p => {
       const seller = DB.userById(p.sellerId);
-      return (p.name + ' ' + p.category + ' ' + (seller ? seller.name + ' ' + seller.username : '')).toLowerCase().includes(q);
+      return matchesQuery(p.name + ' ' + p.category + ' ' + (p.description || '') + ' ' + (seller ? seller.name + ' ' + seller.username : ''), q);
     });
   }
   if (adminProductFilters.category) list = list.filter(p => p.category === adminProductFilters.category);
@@ -320,7 +323,7 @@ function adminProductTableHtml() {
       return `<tr>
         <td><div class="cell-product">
           <img src="${safe(productImage(p))}" alt="${safe(p.name)}" onerror="this.src='${PLACEHOLDER}'">
-          <div><strong>${safe(p.name)}</strong><small>${safe(p.condition)}${p.sold ? ' · Terjual' : ''}</small></div>
+          <div><strong>${safe(p.name)}</strong><small>${safe(p.condition)}${p.sold ? ' · Terjual' : ''}${productPhotos(p).length > 1 ? ' · ' + productPhotos(p).length + ' foto' : ''}</small></div>
         </div></td>
         <td><strong style="font-size:12.5px">${safe(seller ? seller.name : 'Tidak diketahui')}</strong><div class="small">@${safe(seller ? seller.username : '-')}</div></td>
         <td>${safe(p.category)}</td>
@@ -810,19 +813,82 @@ function recentLogsHtml(limit) {
   }).join('')}</div>`;
 }
 
+const ADMIN_ACTION_LABELS = {
+  approve_product: 'Setujui produk',
+  reject_product: 'Tolak produk',
+  remove_product: 'Nonaktifkan produk',
+  delete_product: 'Hapus produk',
+  suspend_user: 'Tangguhkan akun',
+  activate_user: 'Aktifkan akun',
+  verify_user: 'Verifikasi akun',
+  update_category: 'Ubah kategori',
+  create_category: 'Tambah kategori',
+  delete_category: 'Hapus kategori',
+  report_under_review: 'Laporan ditinjau',
+  report_resolved: 'Laporan diselesaikan',
+  report_rejected: 'Laporan ditolak',
+  backup_data: 'Unduh backup',
+  restore_backup: 'Pulihkan backup',
+  clear_security_logs: 'Bersihkan log keamanan',
+  export_csv: 'Ekspor CSV'
+};
+function actionLabel(action) { return ADMIN_ACTION_LABELS[action] || action; }
+
+function adminFilteredLogs() {
+  let list = DB.logs();
+  if (adminLogFilters.action) list = list.filter(l => l.action === adminLogFilters.action);
+  if (adminLogFilters.q.trim()) {
+    list = list.filter(l => {
+      const admin = DB.userById(l.adminId);
+      return matchesQuery((l.description || '') + ' ' + l.action + ' ' + (admin ? admin.name + ' ' + admin.username : ''), adminLogFilters.q);
+    });
+  }
+  return list;
+}
+
+function adminLogListHtml() {
+  const list = adminFilteredLogs();
+  const counter = document.getElementById('adminLogCount');
+  if (counter) counter.textContent = list.length + ' aktivitas';
+  if (!list.length) return '<div class="table-wrap"><div class="empty" style="padding:44px">Tidak ada aktivitas pada filter ini.</div></div>';
+  return `<div class="log-list">${list.map(l => {
+    const admin = DB.userById(l.adminId);
+    return `<div class="log-item"><span class="dot"></span><div style="flex:1">
+      <b>${safe(admin ? admin.name : 'Administrator')}</b> — ${safe(l.description)}
+      <time>${fmtDateTime(l.timestamp)} · ${safe(actionLabel(l.action))} <span style="opacity:.7">(${safe(l.action)})</span></time>
+    </div></div>`;
+  }).join('')}</div>`;
+}
+
+function renderAdminLogList() {
+  const el = document.getElementById('adminLogList');
+  if (el) el.innerHTML = adminLogListHtml();
+}
+
+function resetAdminLogFilters() {
+  adminLogFilters = { q: '', action: '' };
+  renderAdmin(location.hash.replace(/^#/, '') || '/admin');
+}
+
 function adminLogsHtml() {
   const logs = DB.logs();
   const secLogs = SEC.logs();
+  const actions = [...new Set(logs.map(l => l.action))].sort();
   return `
-    <div class="admin-section-title"><div><h2>Admin Activity Log</h2><p>Riwayat tindakan administrator pada marketplace.</p></div>
-      <span class="small">${logs.length} aktivitas</span></div>
-    ${logs.length ? `<div class="log-list">${logs.map(l => {
-      const admin = DB.userById(l.adminId);
-      return `<div class="log-item"><span class="dot"></span><div style="flex:1">
-        <b>${safe(admin ? admin.name : 'Administrator')}</b> — ${safe(l.description)}
-        <time>${fmtDateTime(l.timestamp)} · aksi: ${safe(l.action)}</time>
-      </div></div>`;
-    }).join('')}</div>` : '<div class="table-wrap"><div class="empty" style="padding:44px">Belum ada aktivitas administrator yang tercatat.<br><span class="small">Setujui, tolak, atau kelola data untuk mulai mencatat log.</span></div></div>'}
+    <div class="admin-section-title"><div><h2>Admin Activity Log</h2><p>Catatan audit setiap tindakan administrator pada marketplace.</p></div>
+      <div class="row-actions" style="align-items:center">
+        <button class="btn btn-outline btn-sm" onclick="exportActivityLogCsv(true)">⤓ Ekspor CSV</button>
+        <span class="small" id="adminLogCount">${logs.length} aktivitas</span>
+      </div></div>
+    <div class="admin-table-tools">
+      <div class="search"><span>⌕</span><input type="search" id="adminLogSearch" value="${safe(adminLogFilters.q)}" placeholder="Cari deskripsi, aksi, atau nama admin..." oninput="adminLogFilters.q=this.value;renderAdminLogList()"></div>
+      <select onchange="adminLogFilters.action=this.value;renderAdminLogList()">
+        <option value="">Semua aksi</option>
+        ${actions.map(a => `<option value="${safe(a)}" ${adminLogFilters.action === a ? 'selected' : ''}>${safe(actionLabel(a))}</option>`).join('')}
+      </select>
+      <button class="btn btn-light btn-sm" onclick="resetAdminLogFilters()">Reset</button>
+    </div>
+    <div id="adminLogList">${adminLogListHtml()}</div>
 
     <div class="admin-section-title" style="margin-top:26px"><div><h2>Log Keamanan</h2><p>Percobaan login, verifikasi MFA, sesi, dan perubahan password.</p></div>
       <span class="small">${secLogs.length} peristiwa</span></div>
@@ -909,4 +975,111 @@ function clearSecurityLogs() {
     toast('Log keamanan dibersihkan.', 'info');
     renderAdmin('/admin/logs');
   });
+}
+
+/* ---------------- Admin data export (CSV) ---------------- */
+function adminExportHtml() {
+  const products = DB.products();
+  const users = DB.users();
+  const orders = DB.orders();
+  const logs = DB.logs();
+  const card = (icon, title, desc, count, unit, action) => `
+    <div class="export-card">
+      <div class="export-icon">${icon}</div>
+      <h3>${title}</h3>
+      <p>${desc}</p>
+      <div class="export-meta"><b>${count}</b> ${unit}</div>
+      <button class="btn btn-primary btn-sm" onclick="${action}">⤓ Unduh CSV</button>
+    </div>`;
+  return `
+    <div class="admin-section-title"><div><h2>Data Export</h2><p>Unduh data marketplace sebagai CSV untuk laporan atau analisis di Excel/Google Sheets.</p></div></div>
+    <div class="export-grid">
+      ${card('▦', 'Produk', 'Seluruh produk termasuk pending, rejected, dan terjual.', products.length, 'produk', 'exportProductsCsv()')}
+      ${card('♙', 'Pengguna', 'Akun admin dan member beserta status verifikasi.', users.length, 'akun', 'exportUsersCsv()')}
+      ${card('◉', 'Pesanan', 'Semua pesanan beserta status dan nilai transaksi.', orders.length, 'pesanan', 'exportOrdersCsv()')}
+      ${card('◷', 'Audit Log', 'Riwayat tindakan administrator.', logs.length, 'aktivitas', 'exportActivityLogCsv()')}
+    </div>
+    <div class="hint" style="margin-top:16px">File CSV memakai pemisah titik koma (;) dan BOM UTF-8 agar rapi saat dibuka langsung di Excel versi Indonesia. Data pribadi seperti email dan nomor WhatsApp ikut terekspor — simpan file secara privat.</div>
+    <div class="table-wrap" style="padding:18px;margin-top:14px">
+      <p class="small" style="margin:0">Ekspor berjalan sepenuhnya di browser ini; tidak ada data yang dikirim ke server. Setiap unduhan tercatat pada Admin Activity Log.</p>
+    </div>`;
+}
+
+function csvCell(value) {
+  let s = value === undefined || value === null ? '' : String(value);
+  // Cegah formula injection saat file dibuka di Excel/Sheets
+  if (/^[=+\-@]/.test(s)) s = "'" + s;
+  return '"' + s.replace(/"/g, '""').replace(/\r?\n/g, ' ') + '"';
+}
+function toCsv(headers, rows) {
+  return '\uFEFF' + [headers, ...rows].map(row => row.map(csvCell).join(';')).join('\r\n');
+}
+function downloadCsv(filename, csv) {
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+function csvStamp() { return new Date().toISOString().slice(0, 10); }
+
+function exportProductsCsv() {
+  if (!requireAdmin()) return;
+  const rows = DB.products().map(p => {
+    const seller = DB.userById(p.sellerId);
+    return [p.id, p.name, p.category, p.condition, p.price, p.location,
+      seller ? seller.name : '', seller ? seller.username : '', p.status,
+      p.sold ? 'Ya' : 'Tidak', productPhotos(p).length, p.phone, p.description, p.createdAt, p.updatedAt];
+  });
+  downloadCsv('reuse-produk-' + csvStamp() + '.csv', toCsv(
+    ['ID', 'Nama Produk', 'Kategori', 'Kondisi', 'Harga (Rp)', 'Lokasi', 'Penjual', 'Username Penjual', 'Status', 'Terjual', 'Jumlah Foto', 'WhatsApp', 'Deskripsi', 'Diunggah', 'Diperbarui'],
+    rows));
+  logAdmin('export_csv', 'Mengekspor ' + rows.length + ' produk ke CSV.');
+  toast(rows.length + ' produk diekspor ke CSV.', 'success');
+}
+
+function exportUsersCsv() {
+  if (!requireAdmin()) return;
+  const rows = DB.users().map(u => [u.id, u.name, u.username, u.email, u.phone, u.location, u.role,
+    userActive(u) ? 'active' : 'inactive', u.verified ? 'Ya' : 'Tidak', u.statusReason || '', u.createdAt]);
+  downloadCsv('reuse-pengguna-' + csvStamp() + '.csv', toCsv(
+    ['ID', 'Nama', 'Username', 'Email', 'WhatsApp', 'Lokasi', 'Role', 'Status', 'Terverifikasi', 'Alasan Status', 'Terdaftar'],
+    rows));
+  logAdmin('export_csv', 'Mengekspor ' + rows.length + ' akun ke CSV.');
+  toast(rows.length + ' akun diekspor ke CSV.', 'success');
+}
+
+function exportOrdersCsv() {
+  if (!requireAdmin()) return;
+  const rows = DB.orders().map(o => {
+    const product = DB.productById(o.productId);
+    const buyer = DB.userById(o.buyerId);
+    const seller = DB.userById(o.sellerId);
+    const qty = Number(o.quantity) || 1;
+    return [o.id, product ? product.name : 'Produk dihapus', buyer ? buyer.name : '', buyer ? buyer.email : '',
+      seller ? seller.name : '', o.price, qty, (Number(o.price) || 0) * qty, o.status, o.note || '',
+      o.declineReason || '', o.createdAt, o.updatedAt, o.completedAt || '', o.reviewId ? 'Ya' : 'Tidak'];
+  });
+  downloadCsv('reuse-pesanan-' + csvStamp() + '.csv', toCsv(
+    ['ID', 'Produk', 'Pembeli', 'Email Pembeli', 'Penjual', 'Harga (Rp)', 'Jumlah', 'Total (Rp)', 'Status', 'Catatan', 'Alasan Tolak', 'Dibuat', 'Diperbarui', 'Selesai', 'Sudah Diulas'],
+    rows));
+  logAdmin('export_csv', 'Mengekspor ' + rows.length + ' pesanan ke CSV.');
+  toast(rows.length + ' pesanan diekspor ke CSV.', 'success');
+}
+
+function exportActivityLogCsv(onlyFiltered) {
+  if (!requireAdmin()) return;
+  const list = onlyFiltered ? adminFilteredLogs() : DB.logs();
+  const rows = list.map(l => {
+    const admin = DB.userById(l.adminId);
+    return [l.timestamp, admin ? admin.name : 'Administrator', admin ? admin.username : '', l.action, actionLabel(l.action), l.description];
+  });
+  downloadCsv('reuse-aktivitas-admin-' + csvStamp() + '.csv', toCsv(
+    ['Waktu', 'Admin', 'Username', 'Kode Aksi', 'Aksi', 'Deskripsi'], rows));
+  logAdmin('export_csv', 'Mengekspor ' + rows.length + ' aktivitas admin ke CSV.');
+  toast(rows.length + ' aktivitas diekspor ke CSV.', 'success');
 }

@@ -3,7 +3,8 @@
    ============================================================ */
 let sellerTab = 'overview';
 let sellerFilters = { q: '', status: '', sort: 'newest' };
-let pendingProductImage = null;
+let pendingPhotos = [];
+const MAX_PRODUCT_PHOTOS = 5;
 let pendingNewProduct = false;
 
 function myProducts(user) {
@@ -189,7 +190,7 @@ function openProductForm(id) {
     toast('Kamu hanya dapat mengedit produk milik sendiri.', 'error');
     return;
   }
-  pendingProductImage = existing ? existing.image : null;
+  pendingPhotos = existing ? productPhotos(existing).slice(0, MAX_PRODUCT_PHOTOS) : [];
   const cats = DB.categories();
   openModal(`
     <h2>${existing ? 'Edit Produk' : 'Add New Product'}</h2>
@@ -204,13 +205,14 @@ function openProductForm(id) {
       <div class="field"><label>Kategori</label><select name="category">${cats.map(c => `<option value="${safe(c.name)}" ${existing && existing.category === c.name ? 'selected' : ''}>${safe(c.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Deskripsi</label><textarea name="description" maxlength="2000" placeholder="Jelaskan kondisi, ukuran, dan detail barang...">${existing ? safe(existing.description) : ''}</textarea></div>
       <div class="field">
-        <label>Foto produk</label>
-        <div class="upload-row">
-          <img id="productPreview" class="upload-preview" src="${existing ? safe(existing.image) : PLACEHOLDER}" alt="Pratinjau foto produk">
-          <label class="btn btn-light btn-sm" style="cursor:pointer">Unggah Foto<input type="file" accept="image/*" style="display:none" onchange="onProductImage(event)"></label>
-          <span class="small">atau tempel URL di bawah. Foto otomatis dikompres agar hemat penyimpanan.</span>
+        <label>Foto produk <span class="small" style="font-weight:600">— maksimal ${MAX_PRODUCT_PHOTOS}, foto pertama menjadi foto utama</span></label>
+        <div class="photo-grid" id="photoGrid">${photoGridHtml()}</div>
+        <div class="upload-row" style="margin-top:10px">
+          <label class="btn btn-light btn-sm" style="cursor:pointer">Unggah Foto<input type="file" accept="image/*" multiple style="display:none" onchange="onProductImages(event)"></label>
+          <span class="small">Bisa pilih beberapa foto sekaligus. Foto otomatis dikompres agar hemat penyimpanan.</span>
         </div>
-        <input name="image" maxlength="600" value="${existing ? safe(existing.image) : ''}" placeholder="https://..." style="margin-top:9px" oninput="document.getElementById('productPreview').src=this.value||'${PLACEHOLDER}'">
+        <input name="image" maxlength="600" value="${existing ? safe(existing.image) : ''}" placeholder="atau tempel URL foto utama (https://...)" style="margin-top:9px">
+        <div class="small" style="margin-top:6px">Tanpa foto? Produk tetap bisa diunggah dengan gambar placeholder, tetapi foto asli lebih cepat disetujui admin.</div>
       </div>
       <div class="form-row">
         <div class="field"><label>Lokasi</label><input name="location" maxlength="80" value="${existing ? safe(existing.location) : safe(user.location)}"></div>
@@ -252,25 +254,57 @@ function compressImage(file, maxSize, quality) {
   });
 }
 
-function onProductImage(e) {
-  const file = e.target.files && e.target.files[0];
-  if (!file) return;
-  if (!file.type.startsWith('image/')) { toast('File harus berupa gambar.', 'error'); return; }
-  if (file.size > 5 * 1024 * 1024) { toast('Ukuran foto maksimal 5 MB.', 'error'); return; }
-  const preview = document.getElementById('productPreview');
-  if (preview) preview.style.opacity = '.5';
-  compressImage(file, 1000, 0.72).then(dataUrl => {
-    pendingProductImage = dataUrl;
-    const pv = document.getElementById('productPreview');
-    if (pv) { pv.src = dataUrl; pv.style.opacity = '1'; }
+function photoGridHtml() {
+  if (!pendingPhotos.length) {
+    return '<div class="photo-empty">Belum ada foto. Unggah minimal satu foto agar produk cepat disetujui.</div>';
+  }
+  return pendingPhotos.map((src, i) => `
+    <figure class="photo-item ${i === 0 ? 'cover' : ''}">
+      <img src="${safe(src)}" alt="Foto produk ${i + 1}">
+      ${i === 0 ? '<span class="photo-cover">Utama</span>' : ''}
+      <button type="button" onclick="removeProductPhoto(${i})" aria-label="Hapus foto ${i + 1}">×</button>
+    </figure>`).join('') +
+    (pendingPhotos.length >= MAX_PRODUCT_PHOTOS
+      ? `<div class="photo-empty" style="max-width:150px">Batas ${MAX_PRODUCT_PHOTOS} foto tercapai.</div>`
+      : '');
+}
+
+function refreshPhotoGrid() {
+  const grid = document.getElementById('photoGrid');
+  if (grid) grid.innerHTML = photoGridHtml();
+}
+
+function removeProductPhoto(index) {
+  if (index < 0 || index >= pendingPhotos.length) return;
+  pendingPhotos.splice(index, 1);
+  refreshPhotoGrid();
+}
+
+async function onProductImages(e) {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (!files.length) return;
+  const room = MAX_PRODUCT_PHOTOS - pendingPhotos.length;
+  if (room <= 0) { toast('Maksimal ' + MAX_PRODUCT_PHOTOS + ' foto per produk.', 'error'); return; }
+  if (files.length > room) toast('Hanya ' + room + ' foto pertama yang ditambahkan (maksimal ' + MAX_PRODUCT_PHOTOS + ').', 'info');
+  let added = 0;
+  for (const file of files.slice(0, room)) {
+    if (!file.type.startsWith('image/')) { toast('File "' + file.name + '" bukan gambar.', 'error'); continue; }
+    if (file.size > 5 * 1024 * 1024) { toast('Foto "' + file.name + '" lebih dari 5 MB.', 'error'); continue; }
+    try {
+      pendingPhotos.push(await compressImage(file, 900, 0.7));
+      added += 1;
+      refreshPhotoGrid();
+    } catch (err) {
+      console.error(err);
+      toast('Foto "' + file.name + '" gagal diproses. Coba file lain.', 'error');
+    }
+  }
+  if (added) {
     const urlInput = document.querySelector('#modalBody input[name="image"]');
     if (urlInput) urlInput.value = '';
-    toast('Foto siap digunakan (' + Math.round(dataUrl.length / 1024) + ' KB setelah dikompres).', 'info');
-  }).catch(err => {
-    console.error(err);
-    if (preview) preview.style.opacity = '1';
-    toast('Foto gagal diproses. Coba file lain.', 'error');
-  });
+    toast(added + ' foto ditambahkan. Foto pertama menjadi foto utama.', 'info');
+  }
 }
 
 function saveProduct(e, id) {
@@ -286,7 +320,9 @@ function saveProduct(e, id) {
   const description = SEC.cleanMultiline(f.description.value, 2000);
   const rawImage = f.image.value.trim();
   const safeImage = rawImage ? SEC.cleanUrl(rawImage) : '';
-  const image = pendingProductImage || safeImage || PLACEHOLDER;
+  const photos = pendingPhotos.slice(0, MAX_PRODUCT_PHOTOS);
+  const image = safeImage || photos[0] || PLACEHOLDER;
+  const images = photos.filter(src => src !== image).slice(0, MAX_PRODUCT_PHOTOS - 1);
   const location = SEC.cleanText(f.location.value, 80);
   const phone = SEC.cleanText(f.phone.value, 20);
 
@@ -307,7 +343,7 @@ function saveProduct(e, id) {
     if (products[idx].sellerId !== user.id) { toast('Kamu bukan pemilik produk ini.', 'error'); return; }
     const wasRejected = products[idx].status === 'rejected';
     products[idx] = Object.assign({}, products[idx], {
-      name, price, category, condition, description, image, location, phone,
+      name, price, category, condition, description, image, images, location, phone,
       status: wasRejected ? 'pending' : products[idx].status,
       rejectionReason: wasRejected ? '' : products[idx].rejectionReason,
       updatedAt: now
@@ -322,7 +358,7 @@ function saveProduct(e, id) {
   } else {
     const product = {
       id: uid('p'), sellerId: user.id, name, price, category, condition, description,
-      image, location, phone, status: 'pending', sold: false, rejectionReason: '',
+      image, images, location, phone, status: 'pending', sold: false, rejectionReason: '',
       createdAt: now, updatedAt: now
     };
     products.unshift(product);
@@ -335,7 +371,7 @@ function saveProduct(e, id) {
     closeModal();
     toast('Produk berhasil ditambahkan dan menunggu persetujuan admin.', 'success');
   }
-  pendingProductImage = null;
+  pendingPhotos = [];
   sellerTab = 'products';
   renderSeller();
   refreshGrids();

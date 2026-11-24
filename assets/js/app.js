@@ -351,6 +351,17 @@ function router() {
     return;
   }
 
+  if (path.startsWith('/product/')) {
+    const productId = decodeURIComponent(path.split('/')[2] || '');
+    setChrome(true);
+    renderExplore();
+    pageTitle('Detail Produk');
+    syncCounts();
+    if (DB.productById(productId)) setTimeout(() => showDetail(productId), 80);
+    else toast('Produk tidak ditemukan atau sudah dihapus.', 'error');
+    return;
+  }
+
   setChrome(true);
   if (path === '/explore') { renderExplore(); pageTitle('Explore'); }
   else { renderHome(); pageTitle(); }

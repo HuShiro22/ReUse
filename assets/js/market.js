@@ -8,7 +8,7 @@ function approvedProducts() {
   return DB.products().filter(p => p.status === 'approved' && !p.sold);
 }
 function sellerOf(p) { return DB.userById(p.sellerId); }
-function productImage(p) { return p && p.image ? p.image : PLACEHOLDER; }
+function productImage(p) { return productPhotos(p)[0] || PLACEHOLDER; }
 function statusBadge(status, sold) {
   if (sold) return '<span class="badge badge-sold">Terjual</span>';
   const map = { pending: ['badge-pending', 'Pending'], approved: ['badge-approved', 'Approved'], rejected: ['badge-rejected', 'Rejected'], removed: ['badge-removed', 'Removed'] };
@@ -148,11 +148,11 @@ function renderHomeGrid() {
   const sort = document.getElementById('homeSort').value;
   let list = approvedProducts().filter(p => {
     const seller = sellerOf(p);
-    const hay = (p.name + ' ' + p.category + ' ' + (seller ? seller.name : '')).toLowerCase();
+    const hay = p.name + ' ' + p.category + ' ' + (p.description || '') + ' ' + p.location + ' ' + (seller ? seller.name : '');
     return (!homeCategory || p.category === homeCategory)
       && (!cond || p.condition === cond)
       && (!loc || p.location === loc)
-      && (!q || hay.includes(q))
+      && matchesQuery(hay, q)
       && productInPriceRange(p, min, max);
   });
   if (sort === 'low') list.sort((a, b) => a.price - b.price);
@@ -165,6 +165,13 @@ function renderHomeGrid() {
 
 /* ---------------- Filter helpers ---------------- */
 const PAGE_SIZE = 12;
+/* Pencarian teks: semua kata pada query harus muncul di data produk */
+function matchesQuery(hay, q) {
+  const words = String(q || '').toLowerCase().trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const text = String(hay || '').toLowerCase();
+  return words.every(w => text.includes(w));
+}
 function productInPriceRange(p, min, max) {
   const v = Number(p.price) || 0;
   if (min !== '' && min !== null && min !== undefined && v < Number(min)) return false;
@@ -200,6 +207,7 @@ function renderExplore() {
         <option value="low" ${exploreState.sort === 'low' ? 'selected' : ''}>Harga terendah</option>
         <option value="high" ${exploreState.sort === 'high' ? 'selected' : ''}>Harga tertinggi</option>
         <option value="name" ${exploreState.sort === 'name' ? 'selected' : ''}>Nama A–Z</option>
+        <option value="rating" ${exploreState.sort === 'rating' ? 'selected' : ''}>Rating penjual tertinggi</option>
       </select>
     </div>
     <div class="toolbar price-range">
@@ -238,16 +246,21 @@ function renderExploreGrid() {
   const source = exploreState.includeSold ? DB.products().filter(p => p.status === 'approved') : approvedProducts();
   let list = source.filter(p => {
     const seller = sellerOf(p);
-    const hay = (p.name + ' ' + p.category + ' ' + (seller ? seller.name : '') + ' ' + p.location).toLowerCase();
+    const hay = p.name + ' ' + p.category + ' ' + (p.description || '') + ' ' + (seller ? seller.name : '') + ' ' + p.location;
     return (!exploreCategory || p.category === exploreCategory)
       && (!cond || p.condition === cond)
-      && (!q || hay.includes(q))
+      && matchesQuery(hay, q)
       && (!exploreState.location || p.location === exploreState.location)
       && productInPriceRange(p, exploreState.min, exploreState.max);
   });
   if (sort === 'low') list.sort((a, b) => a.price - b.price);
   else if (sort === 'high') list.sort((a, b) => b.price - a.price);
   else if (sort === 'name') list.sort((a, b) => a.name.localeCompare(b.name));
+  else if (sort === 'rating') {
+    const rmap = {};
+    list.forEach(p => { if (rmap[p.sellerId] === undefined) rmap[p.sellerId] = sellerStats(p.sellerId).rating; });
+    list.sort((a, b) => (rmap[b.sellerId] - rmap[a.sellerId]) || (new Date(b.createdAt) - new Date(a.createdAt)));
+  }
   else list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   const shown = list.slice(0, exploreState.limit);
   document.getElementById('exploreCount').textContent = list.length + ' produk ditemukan';
@@ -272,6 +285,7 @@ function productCard(p) {
     <div class="product-image" onclick="showDetail('${p.id}')">
       <img src="${safe(productImage(p))}" alt="${safe(p.name)}" loading="lazy" onerror="this.src='${PLACEHOLDER}'">
       <span class="condition">${safe(p.condition)}</span>
+      ${productPhotos(p).length > 1 ? `<span class="photo-badge">▣ ${productPhotos(p).length}</span>` : ''}
       ${unavailable ? '<span class="badge badge-sold" style="position:absolute;bottom:10px;left:12px">Terjual</span>' : ''}
       <button class="heart ${wished ? 'active' : ''}" title="Wishlist" onclick="event.stopPropagation();toggleWish('${p.id}')">${wished ? '♥' : '♡'}</button>
     </div>
@@ -304,20 +318,31 @@ function showDetail(id) {
       return;
     }
   }
+  detailPhotos = productPhotos(p);
   openModal(`
     <div class="detail-grid">
-      <img src="${safe(productImage(p))}" alt="${safe(p.name)}" onerror="this.src='${PLACEHOLDER}'">
+      <div class="detail-media">
+        <div class="detail-main-wrap">
+          <img id="detailMain" src="${safe(detailPhotos[0] || PLACEHOLDER)}" alt="${safe(p.name)}" onerror="this.src='${PLACEHOLDER}'">
+          ${detailPhotos.length > 1 ? `<span class="photo-counter" id="detailCounter">1 / ${detailPhotos.length}</span>` : ''}
+        </div>
+        ${detailPhotos.length > 1 ? `<div class="detail-thumbs">${detailPhotos.map((src, i) => `<button type="button" class="detail-thumb ${i === 0 ? 'active' : ''}" onclick="setDetailPhoto(${i})" aria-label="Lihat foto ${i + 1}"><img src="${safe(src)}" alt=""></button>`).join('')}</div>` : ''}
+      </div>
       <div class="detail-copy">
         <span class="product-cat">${safe(p.category)} · ${safe(p.condition)}</span>
         <h2 style="margin:8px 0 4px">${safe(p.name)}</h2>
         <div class="detail-price">${rupiah(p.price)}</div>
-        ${isOwner || (user && user.role === 'admin') ? `<div style="margin-top:8px">${statusBadge(p.status, p.sold)}</div>` : ''}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+          ${isOwner || (user && user.role === 'admin') ? statusBadge(p.status, p.sold) : ''}
+          <button class="btn btn-light btn-sm" onclick="shareProduct('${p.id}')">⇪ Bagikan</button>
+        </div>
         <p>${safe(p.description)}</p>
         <div class="meta-list">
           <div><b>Penjual:</b> ${safe(seller ? seller.name : 'Seller ReUse')} ${seller ? `· <button style="border:0;background:none;color:var(--forest);font-weight:750;padding:0;text-decoration:underline;font-size:12.5px" onclick="openSellerProfile('${seller.id}')">Lihat profil</button>` : ''}</div>
           <div><b>Lokasi:</b> ${safe(p.location)}</div>
           <div><b>Kondisi:</b> ${safe(p.condition)}</div>
           <div><b>Diunggah:</b> ${fmtDate(p.createdAt)}</div>
+          ${detailPhotos.length > 1 ? `<div><b>Foto:</b> ${detailPhotos.length} foto</div>` : ''}
         </div>
         ${seller ? sellerTrustHtml(seller.id) : ''}
         ${p.sold ? '<div class="hint warn" style="margin-top:12px">Produk ini sudah ditandai terjual.</div>' : ''}
@@ -335,6 +360,56 @@ function showDetail(id) {
         </div>`) }
       </div>
     </div>`);
+}
+
+/* ---------------- Galeri foto produk ---------------- */
+let detailPhotos = [];
+
+function setDetailPhoto(index) {
+  if (!detailPhotos[index]) return;
+  const main = document.getElementById('detailMain');
+  if (main) main.src = detailPhotos[index];
+  document.querySelectorAll('.detail-thumb').forEach((btn, i) => btn.classList.toggle('active', i === index));
+  const counter = document.getElementById('detailCounter');
+  if (counter) counter.textContent = (index + 1) + ' / ' + detailPhotos.length;
+}
+
+/* ---------------- Bagikan produk ---------------- */
+function productShareLink(id) {
+  return location.origin + location.pathname + '#/product/' + encodeURIComponent(id);
+}
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '0';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy') ? resolve() : reject(new Error('copy failed')); }
+    catch (err) { reject(err); }
+    finally { ta.remove(); }
+  });
+}
+function shareProduct(id) {
+  const p = DB.productById(id);
+  if (!p) return;
+  const url = productShareLink(id);
+  const text = p.name + ' · ' + rupiah(p.price) + ' di ReUse';
+  const fallback = () => copyText(url)
+    .then(() => toast('Tautan produk disalin. Tempel di WhatsApp atau media sosial.', 'success'))
+    .catch(() => toast('Tautan gagal disalin. Salin URL dari address bar.', 'error'));
+  if (navigator.share) {
+    navigator.share({ title: p.name, text, url }).catch(err => {
+      if (err && err.name === 'AbortError') return;
+      fallback();
+    });
+    return;
+  }
+  fallback();
 }
 
 function openSellerProfile(sellerId) {

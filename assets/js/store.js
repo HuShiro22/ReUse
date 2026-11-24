@@ -232,6 +232,12 @@ function categoryIcon(name) {
   const c = DB.categories().find(x => x.name === name);
   return c ? c.icon : '◆';
 }
+/* Semua foto produk: foto utama (image) + galeri (images), tanpa duplikat */
+function productPhotos(p) {
+  if (!p) return [];
+  const list = [p.image, ...(Array.isArray(p.images) ? p.images : [])].filter(Boolean);
+  return [...new Set(list)];
+}
 function waLink(phone, text) {
   let p = String(phone || '').replace(/\D/g, '');
   if (p.startsWith('0')) p = '62' + p.slice(1);
@@ -246,7 +252,7 @@ function logAdmin(action, description, adminId) {
     description,
     timestamp: new Date().toISOString()
   });
-  DB.saveLogs(logs.slice(0, 200));
+  DB.saveLogs(logs.slice(0, 500));
 }
 function removeProductEverywhere(productId) {
   DB.saveProducts(DB.products().filter(p => p.id !== productId));
