@@ -107,12 +107,6 @@ function renderLogin() {
         </form>
         <p class="swap">Belum punya akun? <a href="#/register">Daftar sekarang</a></p>
 
-        <div class="demo-box">
-          <strong>Akun demo</strong>
-          <div class="demo-account"><span>Admin</span><code>admin / admin123</code><button type="button" onclick="fillLogin('admin','admin123')">Isi</button></div>
-          <div class="demo-account"><span>Seller</span><code>nadia / nadia123</code><button type="button" onclick="fillLogin('nadia','nadia123')">Isi</button></div>
-          <div class="demo-account"><span>Customer</span><code>aisyah / aisyah123</code><button type="button" onclick="fillLogin('aisyah','aisyah123')">Isi</button></div>
-        </div>
         <p class="small" style="margin-top:12px">Akun administrator memiliki halaman login terpisah di <a href="#/admin-login" style="color:var(--forest);font-weight:750">Admin Login</a>.</p>
       </div>
     </section>
@@ -134,16 +128,7 @@ function togglePassword(inputId, btn) {
   btn.textContent = show ? 'Sembunyi' : 'Lihat';
 }
 
-function fillLogin(username, password) {
-  const u = document.getElementById('loginId');
-  const p = document.getElementById('loginPw');
-  if (!u || !p) return;
-  u.value = username;
-  p.value = password;
-  const btn = p.parentElement.querySelector('.password-toggle');
-  if (btn && p.type === 'text') { p.type = 'password'; btn.textContent = 'Lihat'; }
-  document.getElementById('loginPw').focus();
-}
+
 
 function handleLogin(e) {
   e.preventDefault();
